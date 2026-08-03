@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is a Model Context Protocol (MCP) server that connects to Garmin Connect and exposes fitness and health data to Claude and other MCP-compatible clients. The server provides 157 tools organized into 16 functional modules. `scripts/generate_dxt_tools.py` registers the modules with a mocked client to produce the tool list in `dxt/manifest.json`.
+This is a Model Context Protocol (MCP) server that connects to Garmin Connect and exposes fitness and health data to Claude and other MCP-compatible clients. The server provides 160 tools organized into 17 functional modules. `scripts/generate_dxt_tools.py` registers the modules with a mocked client to produce the tool list in `dxt/manifest.json`.
 
 ## Critical: Garmin API Integration
 
@@ -53,6 +53,7 @@ src/garmin_mcp/
 ├── courses.py                  # Course management
 ├── data_management.py          # Data upload/download operations
 ├── devices.py                  # Device information
+├── exercise_catalog.py         # Garmin strength exercise catalog (public, cached)
 ├── gear_management.py          # Gear tracking
 ├── health_wellness.py          # Health metrics (steps, HR, sleep, etc.)
 ├── http_auth.py                # Bearer authentication for HTTP transports

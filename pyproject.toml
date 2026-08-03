@@ -34,4 +34,3 @@ dev = [
     # starlette.testclient prefers httpx2 and warns when it falls back to httpx.
     "httpx2>=2.0.0",
 ]
-

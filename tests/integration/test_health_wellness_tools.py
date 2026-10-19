@@ -1182,6 +1182,10 @@ async def test_get_weekly_intensity_minutes_tool(app_with_health_wellness, mock_
     assert result is not None
     mock_garmin_client.get_weekly_intensity_minutes.assert_called_once_with("2023-12-28", "2024-01-10")
 
+    # Vigorous minutes count double, as in Garmin Connect: 120 + 2 x 45
+    data = json.loads(result[0][0].text)
+    assert data["weekly_data"][0]["total_minutes"] == 210
+
 
 @pytest.mark.asyncio
 async def test_get_weekly_intensity_minutes_tool_default_weeks(app_with_health_wellness, mock_garmin_client):

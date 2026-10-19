@@ -3,6 +3,7 @@ Integration tests for activity_management module MCP tools
 
 Tests activity management tools using FastMCP integration with mocked Garmin API responses.
 """
+import copy
 import json
 import pytest
 from unittest.mock import Mock
@@ -1068,3 +1069,20 @@ async def test_create_manual_activity_exception(app_with_activity_management, mo
     )
     assert "Error" in result[0][0].text
     assert "Garmin API error" in result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_get_activity_reports_rpe_on_0_to_10_scale(
+    app_with_activity_management, mock_garmin_client
+):
+    """Garmin stores directWorkoutRpe x10; get_activity reports RPE 7, not 70."""
+    details = copy.deepcopy(MOCK_ACTIVITY_DETAILS)
+    details["summaryDTO"]["directWorkoutRpe"] = 70
+    mock_garmin_client.get_activity.return_value = details
+
+    result = await app_with_activity_management.call_tool(
+        "get_activity", {"activity_id": 12345678901}
+    )
+    data = json.loads(result[0][0].text)
+
+    assert data["workout_rpe"] == 7

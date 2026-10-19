@@ -1603,7 +1603,7 @@ def register_tools(app):
                 # Calculate total intensity minutes (vigorous counts double per WHO guidelines)
                 moderate = week.get("moderateValue") or 0
                 vigorous = week.get("vigorousValue") or 0
-                week_entry["total_minutes"] = moderate + vigorous
+                week_entry["total_minutes"] = moderate + 2 * vigorous
 
                 # Remove None values
                 week_entry = {k: v for k, v in week_entry.items() if v is not None}

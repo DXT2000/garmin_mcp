@@ -294,7 +294,12 @@ def register_tools(app):
 
                 # Workout feedback
                 "workout_feel": summary.get('directWorkoutFeel'),
-                "workout_rpe": summary.get('directWorkoutRpe'),
+                # Garmin stores RPE x10 (see set_perceived_effort); report 0-10.
+                "workout_rpe": (
+                    summary['directWorkoutRpe'] / 10
+                    if summary.get('directWorkoutRpe') is not None
+                    else None
+                ),
 
                 # Metadata
                 "lap_count": metadata.get('lapCount'),

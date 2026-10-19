@@ -1263,17 +1263,17 @@ async def test_get_progress_summary_converts_calories_from_garmin_units(
 
 
 @pytest.mark.asyncio
-async def test_get_progress_summary_leaves_non_calorie_metrics_unconverted(
+async def test_get_progress_summary_leaves_unknown_metrics_unconverted(
     app_with_training, mock_garmin_client
 ):
-    """The calorie unit fix must be scoped to metric="calories" only."""
+    """Only metrics with a verified Garmin unit are converted."""
     mock_garmin_client.get_progress_summary_between_dates.return_value = [
         {
             "date": "2024-06-01",
             "countOfActivities": 1,
             "stats": {
                 "running": {
-                    "duration": {
+                    "averageHR": {
                         "count": 1,
                         "min": 4450.452,
                         "max": 4450.452,
@@ -1287,7 +1287,7 @@ async def test_get_progress_summary_leaves_non_calorie_metrics_unconverted(
 
     result = await app_with_training.call_tool(
         "get_progress_summary_between_dates",
-        {"start_date": "2024-01-08", "end_date": "2024-01-15", "metric": "duration"},
+        {"start_date": "2024-01-08", "end_date": "2024-01-15", "metric": "averageHR"},
     )
     data = json.loads(result[0][0].text)
 
@@ -1402,3 +1402,32 @@ async def test_hrv_trend_without_nightly_values(app_with_training, mock_garmin_c
     data = json.loads(result[0][0].text)
     assert data["period_avg_hrv_ms"] is None
     assert data["trend"] == [{"date": "2026-09-05", "weekly_avg_hrv_ms": 60}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "metric, raw, expected",
+    [
+        # Real values for a 7029.02 m / 2520.1 s run with 19 m gain
+        ("distance", 702902.001953125, 7029.02001953125),
+        ("elevationGain", 1900.0, 19.0),
+        ("duration", 2520108.88671875, 2520.10888671875),
+        ("movingDuration", 2515513.984680176, 2515.513984680176),
+    ],
+)
+async def test_get_progress_summary_converts_cm_and_ms(
+    app_with_training, mock_garmin_client, metric, raw, expected
+):
+    """fitnessstats stores distance/elevation in cm and durations in ms."""
+    stat = {"count": 1, "min": raw, "max": raw, "avg": raw, "sum": raw}
+    mock_garmin_client.get_progress_summary_between_dates.return_value = [
+        {"stats": {"running": {metric: stat}}}
+    ]
+
+    result = await app_with_training.call_tool(
+        "get_progress_summary_between_dates",
+        {"start_date": "2026-10-13", "end_date": "2026-10-13", "metric": metric},
+    )
+    data = json.loads(result[0][0].text)
+
+    assert data["stats_by_activity_type"]["running"]["sum"] == pytest.approx(expected)

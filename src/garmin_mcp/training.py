@@ -49,12 +49,26 @@ def _lt_speed(raw: Any) -> Tuple[Optional[float], Optional[str]]:
 # not a general kJ conversion.
 _PROGRESS_CALORIES_FACTOR = 4.19
 
+# The same endpoint stores distance and elevation in centimetres and durations
+# in milliseconds (verified against get_activity: a 7029.02 m / 2520.1 s run
+# with 19 m gain comes back as 702902 / 2520108 / 1900).
+_PROGRESS_METRIC_DIVISORS = {
+    "calories": _PROGRESS_CALORIES_FACTOR,
+    "distance": 100,
+    "elevationGain": 100,
+    "elevationLoss": 100,
+    "duration": 1000,
+    "movingDuration": 1000,
+    "elapsedDuration": 1000,
+}
+
 
 def _convert_progress_metric(metric: str, value: Optional[float]) -> Optional[float]:
     """Convert a raw progress-summary stat value to its documented unit."""
-    if value is None or metric != "calories":
+    divisor = _PROGRESS_METRIC_DIVISORS.get(metric)
+    if value is None or divisor is None:
         return value
-    return value / _PROGRESS_CALORIES_FACTOR
+    return value / divisor
 
 
 def _extract_vo2_measurements(data: Any) -> Dict[str, float]:
@@ -375,9 +389,10 @@ def register_tools(app):
             end_date: End date in YYYY-MM-DD format
             metric: Metric to get progress for (e.g., "elevationGain", "duration", "distance", "movingDuration", "calories")
 
-        Note: "calories" values are returned in kcal. Garmin's underlying
-        endpoint stores this metric pre-scaled by ~4.19; this tool undoes
-        that scaling before returning.
+        Units: distance and elevationGain/elevationLoss in metres,
+        duration/movingDuration/elapsedDuration in seconds, calories in kcal.
+        Garmin's endpoint stores these in centimetres, milliseconds and
+        kcal x ~4.19; this tool converts them before returning.
         """
         try:
             summary_data = garmin_client.get_progress_summary_between_dates(

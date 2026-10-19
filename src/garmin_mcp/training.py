@@ -26,6 +26,21 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+# Garmin stores lactate-threshold speed in tens of metres per second: 0.30833
+# is 3.0833 m/s, or 5:24/km (verified against the watch's own LT pace).
+# Reading it as seconds per metre gave paces up to 1.5 min/km too fast.
+_LT_SPEED_TO_MPS = 10
+
+
+def _lt_speed(raw: Any) -> Tuple[Optional[float], Optional[str]]:
+    """Convert a raw lactate-threshold speed to (m/s, "m:ss" per km)."""
+    if not isinstance(raw, (int, float)) or raw <= 0:
+        return None, None
+    mps = raw * _LT_SPEED_TO_MPS
+    seconds = round(1000 / mps)
+    return mps, f"{seconds // 60}:{seconds % 60:02d}"
+
+
 # The fitnessstats "calories" metric is stored pre-multiplied by this factor
 # (verified empirically: activity kcal totals from get_activity/get_stats
 # times exactly 4.19 reproduce the raw sum/avg/min/max here). It doesn't match
@@ -927,17 +942,17 @@ def register_tools(app):
                 # Process speed history
                 speed_history = threshold.get("speed", [])
                 if speed_history:
-                    # Garmin returns speed as seconds/metre (inverse pace); invert to m/s.
-                    curated["speed_history"] = [
-                        {
-                            "date": entry.get("from"),
-                            "speed_mps": (
-                                1 / entry.get("value") if entry.get("value") else None
-                            ),
-                            "series": entry.get("series"),
-                        }
-                        for entry in speed_history
-                    ]
+                    curated["speed_history"] = []
+                    for entry in speed_history:
+                        mps, pace = _lt_speed(entry.get("value"))
+                        curated["speed_history"].append(
+                            {
+                                "date": entry.get("from"),
+                                "speed_mps": mps,
+                                "pace_per_km": pace,
+                                "series": entry.get("series"),
+                            }
+                        )
 
                 # Process heart rate history
                 hr_history = threshold.get("heartRate", [])
@@ -967,11 +982,11 @@ def register_tools(app):
                 speed_hr = threshold.get("speed_and_heart_rate", {})
                 power = threshold.get("power", {})
 
-                raw_speed = speed_hr.get("speed")
+                speed_mps, pace = _lt_speed(speed_hr.get("speed"))
                 curated = {
                     # Speed and heart rate data
-                    # Garmin returns speed as seconds/metre (inverse pace); invert to m/s.
-                    "lactate_threshold_speed_mps": 1 / raw_speed if raw_speed else None,
+                    "lactate_threshold_speed_mps": speed_mps,
+                    "lactate_threshold_pace_per_km": pace,
                     "lactate_threshold_heart_rate_bpm": speed_hr.get("heartRate"),
                     "heart_rate_cycling_bpm": speed_hr.get("heartRateCycling"),
                     "speed_hr_date": speed_hr.get("calendarDate"),

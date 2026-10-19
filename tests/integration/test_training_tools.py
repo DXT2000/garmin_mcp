@@ -815,8 +815,9 @@ async def test_get_lactate_threshold_tool_latest(app_with_training, mock_garmin_
 
     # Verify output structure
     data = json.loads(result[0][0].text)
-    # Garmin returns speed as seconds/metre (inverse pace); the tool inverts it to m/s.
-    assert abs(data["lactate_threshold_speed_mps"] - 1 / 0.32222132) < 1e-6
+    # Garmin stores speed in tens of m/s: 0.32222132 -> 3.2222 m/s -> 5:10/km.
+    assert abs(data["lactate_threshold_speed_mps"] - 3.2222132) < 1e-6
+    assert data["lactate_threshold_pace_per_km"] == "5:10"
     assert data["lactate_threshold_heart_rate_bpm"] == 169
     assert data["functional_threshold_power_watts"] == 334
     assert data["sport"] == "RUNNING"
@@ -850,8 +851,9 @@ async def test_get_lactate_threshold_tool_range(app_with_training, mock_garmin_c
     assert "speed_history" in data
     assert len(data["speed_history"]) == 3
     assert data["speed_history"][0]["date"] == "2024-01-08"
-    # Garmin returns speed as seconds/metre (inverse pace); the tool inverts it to m/s.
-    assert abs(data["speed_history"][0]["speed_mps"] - 1 / 0.29444) < 1e-4
+    # Garmin stores speed in tens of m/s: 0.29444 -> 2.9444 m/s -> 5:40/km.
+    assert abs(data["speed_history"][0]["speed_mps"] - 2.9444) < 1e-4
+    assert data["speed_history"][0]["pace_per_km"] == "5:40"
     assert "heart_rate_history" in data
     assert len(data["heart_rate_history"]) == 3
     assert "power_history" in data

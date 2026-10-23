@@ -6,6 +6,7 @@ from unittest.mock import Mock
 from garminconnect import (
     GarminConnectAuthenticationError,
     GarminConnectConnectionError,
+    GarminConnectNotFoundError,
     GarminConnectTooManyRequestsError,
 )
 
@@ -136,15 +137,20 @@ class TestResolveCallTimeout:
         assert _resolve_call_timeout() == _DEFAULT_CALL_TIMEOUT
 
 
-@pytest.mark.parametrize("status, hint", [
-    (401, "Re-run 'garmin-mcp-auth'"),
-    (429, "Wait a few minutes"),
-    (400, "Check the request arguments"),
-    (403, "Check the request arguments"),
-    (404, "Check the request arguments"),
-    (500, "server error"),
+# Since garminconnect 0.3.19, Garmin.connectapi re-raises a 401 as
+# GarminConnectAuthenticationError and a 429 as GarminConnectTooManyRequestsError
+# (neither subclasses GarminConnectConnectionError), and a 404 as
+# GarminConnectNotFoundError. The proxy must keep its hint on those types, so
+# each status names the exact type it should surface as.
+@pytest.mark.parametrize("status, expected, hint", [
+    (401, GarminConnectAuthenticationError, "Re-run 'garmin-mcp-auth'"),
+    (429, GarminConnectTooManyRequestsError, "Wait a few minutes"),
+    (400, GarminConnectConnectionError, "Check the request arguments"),
+    (403, GarminConnectConnectionError, "Check the request arguments"),
+    (404, GarminConnectNotFoundError, "Check the request arguments"),
+    (500, GarminConnectConnectionError, "server error"),
 ])
-def test_proxy_classifies_real_library_http_error_shape(status, hint):
+def test_proxy_classifies_real_library_http_error_shape(status, expected, hint):
     """Run the real Garmin.connectapi wrapper with its HTTP client mocked."""
     from garminconnect import Garmin
 
@@ -154,8 +160,9 @@ def test_proxy_classifies_real_library_http_error_shape(status, hint):
         f"API Error {status} - rejected"
     )
     proxy = _GarminProxy(garmin, timeout=0)
-    with pytest.raises(GarminConnectConnectionError) as caught:
+    with pytest.raises(expected) as caught:
         proxy.connectapi("/test")
+    assert type(caught.value) is expected
     assert hint in str(caught.value)
     assert "check your network" not in str(caught.value)
     assert f"API Error {status}" in str(caught.value)

@@ -5,17 +5,62 @@ this file is the tracker.
 
 ## Port to mcp 2.x
 
-`pyproject.toml` caps `mcp` below 2: mcp 2.x renamed `mcp.server.fastmcp` to
-`mcp.server.mcpserver` (`FastMCP` to `MCPServer`), and the server is not ported yet.
-Parked 2026-10-23, when mcp 1.30.0 was the newest 1.x and 2.3.0 the newest 2.x.
+`pyproject.toml` caps `mcp` below 2. Parked by choice, not blocked: everything below
+was measured or verified on 2026-10-23, against mcp 1.30.0 (newest 1.x, security
+fixes only from here on) and 2.3.0 (newest 2.x).
 
-Scope: every `FastMCP` import and construction (`git grep FastMCP`), the test
-fixtures that build an app, then lift the cap. Upstream (Taxuspt) has the same cap,
-so check whether they have ported before doing it here; a port of our own would
-conflict with theirs on every sync.
+### What 2.x would give this server
 
-Done when: tests pass on mcp 2.x, and the server starts through the `uvx` command
-in `~/.claude.json` and answers a read tool and a refused `power.between` upload.
+Protocol revision 2026-07-28, in which a tool can ask the user a question mid-call
+(it returns an `InputRequiredResult`; the client asks, then repeats the call with
+the answer). The delete and confirm tools could ask "are you sure?" instead of the
+current call-again-with-`confirm=true` pattern, which stays safe in the meantime.
+
+Verified with Claude Code 2.1.309, through a logging relay around a probe server on
+mcp 2.3.0: it opens with `server/discover` at 2026-07-28 (no `initialize`), sends
+every request at that revision, and declares form and URL elicitation. In an
+interactive session a test question came back `accept` with both a boolean and a
+free-text field filled in.
+
+### What porting costs
+
+Measured in a spike that ported fork main `6c22106` to mcp 2.3.0. The spike is the
+local branch `spike/mcp2` in one clone, not pushed; its commit message has the detail.
+
+- Source: only `__init__.py`. The transport settings (`host`, `port`,
+  `stateless_http`) move from the constructor to `run()`, and stdio takes none.
+- Tests, all mechanical: the import rename; `call_tool()` now returns a
+  `CallToolResult`, so `result[0][0].text` becomes `result.content[0].text`;
+  camelCase attributes become snake_case (`input_schema`, `read_only_hint`, ...);
+  the annotations dump needs `by_alias=True` to keep wire keys.
+- With those, 1278 of 1279 tests passed. The one left is the decision below.
+- Unchanged, checked live: the HTTP bearer-token gate (401 without or with a wrong
+  token), and a 2025-era client (mcp 1.30) still connects at 2025-11-25.
+- Small: pass `version=` to `MCPServer`, which otherwise reports an empty version.
+- Not checked in the spike: the SSE transport, the e2e tests, the DXT generator
+  script, and write tools on 2.x.
+
+### The open decision
+
+On 2.x an exception a tool does not catch reaches the model only as
+`Error executing tool <name>`; the cause goes to the server log. Hints this fork
+carries in exception text ("re-run garmin-mcp-auth", rate-limit waits) would stop
+reaching Claude from any tool that lets them escape. Either raise `ToolError` for
+anticipated failures (2.x passes its message through) or catch in each tool.
+In the spike, 28 of 157 tools had code outside a broad `try/except` (a static count,
+so an upper bound); each needs that review. `test_tool_exceptions_still_surface`
+encodes the 1.x behaviour and has to change with whichever choice is made.
+
+### When to port
+
+Upstream (Taxuspt) has the same cap. Porting here first means later upstream syncs
+conflict in the server setup and in 20+ test files. Port when upstream has ported
+(then sync instead), when a 1.x security issue goes unfixed, or when the
+confirmation prompts are wanted enough to carry those conflicts.
+
+Done when: tests pass on mcp 2.x, the crash-message decision above is applied, and
+the server starts through the `uvx` command in `~/.claude.json`, answers a read
+tool, and refuses a `power.between` upload.
 
 ## Keep the fork's side when syncing upstream
 

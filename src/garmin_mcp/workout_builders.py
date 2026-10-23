@@ -30,6 +30,13 @@ HR_ZONE_MAP = {
 }
 
 
+def _require_minimum(minimum: int, **fields: int) -> None:
+    """Reject durations/counts that cannot describe the requested workout."""
+    for field, value in fields.items():
+        if value < minimum:
+            raise ValueError(f"{field} must be >= {minimum}")
+
+
 def _zone_number(zone: str) -> int:
     """Resolve a human-friendly zone string like 'Z3' to Garmin's zoneNumber."""
     zone_upper = zone.strip().upper()
@@ -49,19 +56,26 @@ def _hr_target(
     hr_zone: str,
     hr_min: Optional[int],
     hr_max: Optional[int],
+    prefix: str = "",
 ) -> tuple:
     """Resolve HR target fields and a short description suffix.
 
     Returns (target_extra_fields, description_suffix). If hr_min/hr_max are
     both given, builds a custom bpm-range target (targetValueOne/targetValueTwo)
     instead of a named Garmin zone. A custom range and a named zone are mutually
-    exclusive -- if a range is given, hr_zone is ignored.
+    exclusive -- if a range is given, hr_zone is ignored. prefix names the
+    caller's parameters in errors (e.g. "recovery_" for recovery_hr_min).
     """
     if hr_min is not None or hr_max is not None:
         if hr_min is None or hr_max is None:
-            raise ValueError("hr_min and hr_max must both be provided together.")
+            raise ValueError(
+                f"{prefix}hr_min and {prefix}hr_max must both be provided together."
+            )
         if hr_min >= hr_max:
-            raise ValueError(f"hr_min ({hr_min}) must be less than hr_max ({hr_max}).")
+            raise ValueError(
+                f"{prefix}hr_min ({hr_min}) must be less than "
+                f"{prefix}hr_max ({hr_max})."
+            )
         return (
             {"targetValueOne": float(hr_min), "targetValueTwo": float(hr_max)},
             f"{hr_min}-{hr_max}bpm",
@@ -85,6 +99,8 @@ def build_run_json(
     hr_max together to target an exact custom bpm range instead (e.g. a
     136-148 bpm range that doesn't line up with any single Garmin zone).
     """
+    _require_minimum(1, run_seconds=run_seconds)
+    _require_minimum(0, warmup_min=warmup_min, cooldown_min=cooldown_min)
     hr_target_fields, hr_desc = _hr_target(hr_zone, hr_min, hr_max)
     run_display = (
         f"{run_seconds // 60}m" if run_seconds % 60 == 0 else f"{run_seconds}s"
@@ -161,14 +177,17 @@ def build_run_interval_json(
     a hard rep, because heart rate lags the effort -- usually noise rather
     than signal.
     """
-    if repeats < 1:
-        raise ValueError("repeats must be >= 1")
-    if rep_seconds < 1:
-        raise ValueError("rep_seconds must be >= 1")
-    if recovery_seconds < 0:
-        raise ValueError("recovery_seconds must be >= 0")
+    _require_minimum(1, repeats=repeats, rep_seconds=rep_seconds)
+    _require_minimum(0, recovery_seconds=recovery_seconds, warmup_min=warmup_min, cooldown_min=cooldown_min)
 
     hr_target_fields, hr_desc = _hr_target(hr_zone, hr_min, hr_max)
+    rec_fields = None
+    if recovery_hr_min is not None or recovery_hr_max is not None:
+        rec_fields, rec_desc = _hr_target(
+            None, recovery_hr_min, recovery_hr_max, prefix="recovery_"
+        )
+        if recovery_seconds == 0:
+            raise ValueError("recovery_hr_min/recovery_hr_max require recovery_seconds > 0")
 
     rep_display = f"{rep_seconds // 60}m" if rep_seconds % 60 == 0 else f"{rep_seconds}s"
     rec_display = (
@@ -210,8 +229,7 @@ def build_run_interval_json(
                 "workoutTargetTypeKey": "no.target",
             },
         }
-        if recovery_hr_min is not None and recovery_hr_max is not None:
-            rec_fields, rec_desc = _hr_target(None, recovery_hr_min, recovery_hr_max)
+        if rec_fields is not None:
             recovery_step["targetType"] = {
                 "workoutTargetTypeId": 4,
                 "workoutTargetTypeKey": "heart.rate.zone",
@@ -221,12 +239,15 @@ def build_run_interval_json(
         repeat_children.append(recovery_step)
 
     cooldown_order = 3 + len(repeat_children)
+    interval_description = f"{repeats}x({rep_display} {hr_desc}"
+    if recovery_seconds > 0:
+        interval_description += f" / {rec_display} jog"
+    interval_description += ")"
 
     return {
         "workoutName": name,
         "description": (
-            f"{warmup_min}m warmup + {repeats}x({rep_display} {hr_desc} / "
-            f"{rec_display} jog) + {cooldown_min}m cooldown"
+            f"{warmup_min}m warmup + {interval_description} + {cooldown_min}m cooldown"
         ),
         "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
         "workoutSegments": [
@@ -295,7 +316,16 @@ def build_walk_run_json(
     """Build the Garmin Connect JSON for a walk/run interval workout.
 
     Parameters match create_walk_run_workout exactly.
+
+    stepOrder is one depth-first counter over the whole workout, the way
+    Garmin Connect numbers its own workouts: the repeat group takes 2, its
+    children continue at 3 and 4, and the cooldown is 5. Restarting at 1
+    inside the group uploads cleanly but leaves duplicate step orders. The
+    group also carries the explicit repeat stepType and iterations
+    endCondition, as build_run_interval_json does.
     """
+    _require_minimum(1, run_seconds=run_seconds, walk_seconds=walk_seconds, repeats=repeats)
+    _require_minimum(0, warmup_min=warmup_min, cooldown_min=cooldown_min)
     zone = _zone_number(hr_zone)
     return {
         "workoutName": name,
@@ -320,11 +350,15 @@ def build_walk_run_json(
                 {
                     "type": "RepeatGroupDTO",
                     "stepOrder": 2,
+                    "stepType": {"stepTypeId": 6, "stepTypeKey": "repeat"},
                     "numberOfIterations": repeats,
+                    "smartRepeat": False,
+                    "endCondition": {"conditionTypeId": 7, "conditionTypeKey": "iterations"},
+                    "endConditionValue": float(repeats),
                     "workoutSteps": [
                         {
                             "type": "ExecutableStepDTO",
-                            "stepOrder": 1,
+                            "stepOrder": 3,
                             "stepType": {"stepTypeId": 3, "stepTypeKey": "interval"},
                             "description": f"Run {run_seconds}s Z{zone}",
                             "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
@@ -334,7 +368,7 @@ def build_walk_run_json(
                         },
                         {
                             "type": "ExecutableStepDTO",
-                            "stepOrder": 2,
+                            "stepOrder": 4,
                             "stepType": {"stepTypeId": 4, "stepTypeKey": "recovery"},
                             "description": f"Walk {walk_seconds}s Z{zone}",
                             "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
@@ -346,7 +380,7 @@ def build_walk_run_json(
                 },
                 {
                     "type": "ExecutableStepDTO",
-                    "stepOrder": 3,
+                    "stepOrder": 5,
                     "stepType": {"stepTypeId": 2, "stepTypeKey": "cooldown"},
                     "description": f"Cooldown {cooldown_min} min",
                     "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
@@ -365,6 +399,7 @@ def build_z2_walk_json(
     hr_max: int,
 ) -> dict:
     """Build the Garmin Connect JSON for a steady Z2 walking workout with absolute HR range."""
+    _require_minimum(1, duration_min=duration_min)
     return {
         "workoutName": name,
         "description": f"Walk {duration_min} min at Z2 ({hr_min}-{hr_max} bpm)",
@@ -435,6 +470,11 @@ def build_strength_json(
         sets = int(ex.get("sets", 1))
         reps = int(ex.get("reps", 1))
         rest_seconds = int(ex.get("rest_seconds", 60))
+        try:
+            _require_minimum(1, sets=sets, reps=reps)
+            _require_minimum(0, rest_seconds=rest_seconds)
+        except ValueError as e:
+            raise ValueError(f"exercise {ex_name!r}: {e}") from e
 
         # Work step
         step = {
@@ -465,11 +505,14 @@ def build_strength_json(
             # what _sanitize_repeat_group enforces on the upload path: the Garmin
             # API silently corrupts a RepeatGroupDTO without a valid iterations
             # endCondition.
-            group_steps = [{**step, "stepOrder": 1}]
+            # Children continue the workout-wide stepOrder count after the
+            # group, as Garmin numbers its own workouts. Restarting at 1 in
+            # every group gave each multi-set exercise the same 1/2 orders.
+            group_steps = [{**step, "stepOrder": step_order + 1}]
             if rest_seconds > 0:
                 group_steps.append({
                     "type": "ExecutableStepDTO",
-                    "stepOrder": 2,
+                    "stepOrder": step_order + 2,
                     "stepType": {"stepTypeId": 4, "stepTypeKey": "recovery"},
                     "description": f"Rest {rest_seconds}s",
                     "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
@@ -483,9 +526,10 @@ def build_strength_json(
                 "numberOfIterations": sets,
                 "smartRepeat": False,
                 "endCondition": {"conditionTypeId": 7, "conditionTypeKey": "iterations"},
+                "endConditionValue": float(sets),
                 "workoutSteps": group_steps,
             })
-            step_order += 1
+            step_order += 1 + len(group_steps)
             # The in-group rest after the final set already separates this exercise
             # from the next one — no extra inter-exercise rest step.
             continue
@@ -543,6 +587,7 @@ def register_tools(app):
 
         Args:
             name: Workout name (e.g. "W3 Mié 2:2")
+                Max 256 characters: Garmin SILENTLY TRUNCATES longer names.
             run_seconds: Duration of each run interval in seconds
             walk_seconds: Duration of each walk/recovery interval in seconds
             repeats: Number of run/walk repetitions
@@ -598,6 +643,7 @@ def register_tools(app):
 
         Args:
             name: Workout name (e.g. "Step 8 - 30min continuous")
+                Max 256 characters: Garmin SILENTLY TRUNCATES longer names.
             run_seconds: Duration of the run in seconds
             warmup_min: Warmup walk duration in minutes
             cooldown_min: Cooldown walk duration in minutes
@@ -657,6 +703,7 @@ def register_tools(app):
 
         Recovery steps carry no target unless recovery_hr_min/max are given -- a capped
         recovery alerts constantly right after a hard rep, since heart rate lags effort.
+        Recovery HR bounds require recovery_seconds > 0.
 
         Example -- 3 x 6 min at HR 172-180 with 3 min jogs, 12m warmup, 8m cooldown:
             repeats=3, rep_seconds=360, recovery_seconds=180,
@@ -716,6 +763,7 @@ def register_tools(app):
 
         Args:
             name: Workout name
+                Max 256 characters: Garmin SILENTLY TRUNCATES longer names.
             duration_min: Main walking block duration in minutes
             hr_min: Minimum heart rate in bpm (used for description; target is Z2)
             hr_max: Maximum heart rate in bpm (used for description; target is Z2)
@@ -757,6 +805,7 @@ def register_tools(app):
 
         Args:
             name: Workout name
+                Max 256 characters: Garmin SILENTLY TRUNCATES longer names.
             exercises: List of dicts with keys: name, sets, reps, rest_seconds and an
                 optional category. Category is omitted from the payload when not
                 given; Garmin accepts that. When given it must be one of Garmin's
@@ -790,20 +839,56 @@ def register_tools(app):
         reported as already scheduled and the POST is skipped (avoids
         duplicating calendar entries).
 
+        Each entry is handled on its own: an invalid or failing entry is
+        reported with status "failed" or "error" and the rest still run.
+        A successful entry includes scheduled_workout_id when Garmin returns
+        the calendar-entry ID; pass it to unschedule_workout to remove the entry.
+
         Args:
             week: List of dicts with keys: date (YYYY-MM-DD), workout_id (int)
         """
         # Imported here (not at module top) to avoid any import-time ordering
         # surprises between sibling modules. Both modules share the same
         # garmin_client instance via configure() in __main__.
-        from garmin_mcp.workouts import _is_already_scheduled
+        from garmin_mcp.workouts import _is_already_scheduled, _validate_date
 
-        try:
-            results = []
-            for item in week:
-                calendar_date = item["date"]
-                workout_id = int(item["workout_id"])
+        results = []
+        for item in week:
+            calendar_date = item.get("date")
+            workout_id = item.get("workout_id")
 
+            # Validate here: _is_already_scheduled swallows a bad date, which
+            # would then be POSTed to Garmin as-is.
+            try:
+                _validate_date(calendar_date, "date")
+            except ValueError as e:
+                results.append({
+                    "date": calendar_date,
+                    "workout_id": workout_id,
+                    "status": "failed",
+                    "message": str(e),
+                })
+                continue
+
+            try:
+                if workout_id is None:
+                    raise ValueError("Missing required field: workout_id")
+                workout_id = int(workout_id)
+                if workout_id < 1:
+                    raise ValueError("workout_id must be a positive integer")
+            except (TypeError, ValueError):
+                results.append({
+                    "date": calendar_date,
+                    "workout_id": workout_id,
+                    "status": "failed",
+                    "message": "workout_id is required and must be a positive integer",
+                })
+                continue
+
+            # Handle errors per item: earlier items are already on the
+            # calendar, and losing their results invites a retry that
+            # double-books them.
+            try:
                 if _is_already_scheduled(workout_id, calendar_date):
                     results.append({
                         "date": calendar_date,
@@ -818,12 +903,19 @@ def register_tools(app):
                 response = garmin_client.client.post(
                     "connectapi", url, json={"date": calendar_date}
                 )
-                if response.status_code == 200:
-                    results.append({
+                if 200 <= response.status_code < 300:
+                    entry = {
                         "date": calendar_date,
                         "workout_id": workout_id,
                         "status": "scheduled",
-                    })
+                    }
+                    try:
+                        schedule_data = response.json()
+                    except ValueError:
+                        schedule_data = None
+                    if isinstance(schedule_data, dict) and schedule_data.get("workoutScheduleId") is not None:
+                        entry["scheduled_workout_id"] = schedule_data["workoutScheduleId"]
+                    results.append(entry)
                 else:
                     results.append({
                         "date": calendar_date,
@@ -831,11 +923,16 @@ def register_tools(app):
                         "status": "failed",
                         "http_status": response.status_code,
                     })
-            return json.dumps({
-                "status": "complete",
-                "scheduled": results,
-            }, indent=2)
-        except Exception as e:
-            return f"Error scheduling week: {str(e)}"
+            except Exception as e:
+                results.append({
+                    "date": calendar_date,
+                    "workout_id": workout_id,
+                    "status": "error",
+                    "message": f"Error scheduling workout: {str(e)}",
+                })
+        return json.dumps({
+            "status": "complete",
+            "scheduled": results,
+        }, indent=2)
 
     return app

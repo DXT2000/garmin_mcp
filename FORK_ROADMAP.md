@@ -23,3 +23,13 @@ Upstream still documents absolute cycling watts as target id 6 / `power.between`
 The fork refuses that form (`_POWER_BETWEEN_ERROR` in `workouts.py`). A sync that
 conflicts on `KNOWN_TARGET_TYPE_IDS`, the `upload_workout` docstring or
 `workout_templates.py` target types must keep the fork's version.
+
+## Starlette test-client deprecation
+
+Since starlette 1.9 (lockfile refresh, 2026-10-23), importing
+`starlette.testclient.TestClient` in `tests/unit/test_http_bearer_token.py` emits
+`StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated;
+install httpx2 instead`. Test-only; the server does not use the test client.
+`pytest.ini` passes `--disable-warnings`, so it shows only as "1 warning" in the
+summary (`-o addopts="" -rw` prints it). What switching to `httpx2` involves has not
+been checked.

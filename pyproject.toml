@@ -31,5 +31,7 @@ dev = [
     "pytest-asyncio>=0.25.2",
     "pytest-mock>=3.14.0",
     "pytest-timeout>=2.3.1",
+    # starlette.testclient prefers httpx2 and warns when it falls back to httpx.
+    "httpx2>=2.0.0",
 ]
 

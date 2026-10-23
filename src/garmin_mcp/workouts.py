@@ -50,11 +50,22 @@ KNOWN_TARGET_TYPE_IDS = {
     1: frozenset(["no.target"]),
     2: frozenset(["power.zone"]),
     4: frozenset(["heart.rate.zone"]),
-    # ID 6 is sport-context-dependent:
-    #   - running / swimming: "pace.zone"
-    #   - cycling: "power.between" (absolute watt range, uses targetValueOne/targetValueTwo)
-    6: frozenset(["pace.zone", "power.between"]),
+    # ID 6 is pace on every sport, cycling included. An absolute watt range is
+    # ID 2 with watt bounds and no zoneNumber; see _POWER_BETWEEN_ERROR.
+    6: frozenset(["pace.zone"]),
 }
+
+# "power.between" is not a Garmin key, but older docs here prescribed it with
+# ID 6, so callers still send it. Garmin accepted that upload as a pace target
+# and the watch read the watts as m/s, with no error anywhere. It is refused by
+# name, with the working form, so the caller can correct the payload instead of
+# getting a generic id/key mismatch.
+_POWER_BETWEEN_ERROR = (
+    "'power.between' is not a Garmin target key: Garmin stores it as a pace "
+    "target and the device reads the watts as metres per second. For an "
+    "absolute watt range use workoutTargetTypeId 2, key 'power.zone', with "
+    "targetValueOne/targetValueTwo in watts and no zoneNumber."
+)
 
 # Reverse map: workoutTargetTypeKey -> workoutTargetTypeId (each key maps to exactly one ID).
 KNOWN_TARGET_TYPE_KEYS = {
@@ -325,6 +336,9 @@ def _validate_target_type_block(step: dict, path: str, target_field: str) -> Non
             except (TypeError, ValueError):
                 raise ValueError(f"{path}.{target_field}.workoutTargetTypeId must be numeric")
             target_type['workoutTargetTypeId'] = target_id
+
+        if target_key == 'power.between':
+            raise ValueError(f"{path}.{target_field}: {_POWER_BETWEEN_ERROR}")
 
         valid_keys = KNOWN_TARGET_TYPE_IDS.get(target_id)
         if valid_keys is not None and target_key is not None and target_key not in valid_keys:
@@ -985,9 +999,9 @@ def register_tools(app):
         Garmin treats workoutTargetTypeId as authoritative, so mismatches are rejected
         before upload.  Known mappings:
         - workoutTargetTypeId 1  -> "no.target"
-        - workoutTargetTypeId 2  -> "power.zone"  (cycling power zone 1-7, use zoneNumber)
+        - workoutTargetTypeId 2  -> "power.zone"  (all cycling power targets, see below)
         - workoutTargetTypeId 4  -> "heart.rate.zone"
-        - workoutTargetTypeId 6  -> "pace.zone" (running/swim) OR "power.between" (cycling)
+        - workoutTargetTypeId 6  -> "pace.zone" (pace only, on every sport including cycling)
 
         IMPORTANT: For cycling power targets use the correct target type:
         - Power zone (zone 1-7 based on FTP %): use workoutTargetTypeId 2, key "power.zone",
@@ -996,10 +1010,11 @@ def register_tools(app):
           "targetValueOne"/"targetValueTwo" as percentages and
           "targetValueUnit": {"unitKey": "percent"}. Garmin Connect shows it as
           "Custom Power 76-81% FTP" with the matching watts.
-        - Absolute watt range (e.g. 200-250 W): use workoutTargetTypeId 6, key "power.between",
-          and "targetValueOne" (low watts) / "targetValueTwo" (high watts).
-        Using workoutTargetTypeId 2 with key "power.between" is a silent Garmin bug: the
-        workout uploads but Garmin stores it as "power.zone" and the intent is lost.
+        - Absolute watt range (e.g. 200-250 W): use workoutTargetTypeId 2, key "power.zone",
+          "targetValueOne" (low watts) / "targetValueTwo" (high watts), and NO zoneNumber.
+        Do NOT use "power.between" or workoutTargetTypeId 6 for watts: Garmin stores that
+        as a pace target and the device reads the watts as metres per second. Uploads
+        using "power.between" are rejected before they are sent.
 
         Use {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone"} with
         targetValueOne/targetValueTwo for custom heart-rate ranges.
@@ -1117,8 +1132,9 @@ def register_tools(app):
         "workoutTargetTypeKey": "heart.rate.zone"} with targetValueOne/targetValueTwo.
         Target values belong on the workout step, alongside targetType, not inside it.
         For cycling power zone targets (zone-based), use workoutTargetTypeId 2, key "power.zone".
-        For cycling absolute watt range targets, use workoutTargetTypeId 6, key "power.between",
-        with targetValueOne (low watts) and targetValueTwo (high watts).
+        For cycling absolute watt range targets, use workoutTargetTypeId 2, key "power.zone",
+        with targetValueOne (low watts) and targetValueTwo (high watts) and no zoneNumber.
+        Never use "power.between" or workoutTargetTypeId 6 for watts (6 is pace).
         Pace targets use targetValueOne/targetValueTwo in meters per second, not
         min/km: 5:00/km = 1000 m / 300 s = 3.333 m/s.
         Target type IDs and keys must match Garmin's canonical mapping.

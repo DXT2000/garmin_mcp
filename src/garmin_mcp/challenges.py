@@ -119,10 +119,12 @@ def _format_distance(meters: float) -> str:
 
 
 def _format_timestamp(timestamp_ms: int) -> str:
-    """Convert millisecond timestamp to readable date string"""
+    """Convert a GMT millisecond timestamp to its UTC date string"""
     if timestamp_ms is None:
         return None
-    dt = datetime.datetime.fromtimestamp(timestamp_ms / 1000.0)
+    dt = datetime.datetime.fromtimestamp(
+        timestamp_ms / 1000.0, tz=datetime.timezone.utc
+    )
     return dt.strftime("%Y-%m-%d")
 
 
@@ -420,7 +422,12 @@ def register_tools(app):
                     "type_id": type_id,
                     "value": formatted_value,
                     "raw_value": raw_value,
-                    "date": _format_timestamp(record.get("prStartTimeGMT")),
+                    # Local date the record was set; the GMT timestamp's UTC
+                    # date is only a fallback, as it can be a day off
+                    "date": (
+                        _parse_iso_date(record.get("prStartTimeLocalFormatted"))
+                        or _format_timestamp(record.get("prStartTimeGmt"))
+                    ),
                 }
 
                 # Add activity info if available
@@ -587,10 +594,10 @@ def register_tools(app):
 
     @app.tool()
     async def get_badge_challenges(start: int = 1, limit: int = 20) -> str:
-        """Get all badge challenges the user has joined (completed and in-progress)
+        """Get badge challenges the user has completed.
 
-        Returns the user's history of badge challenges including progress,
-        completion status, and earned dates.
+        Returns the completed badge-challenge history and earned dates. For
+        challenges still in progress, use get_non_completed_badge_challenges.
 
         Args:
             start: Starting index for pagination (starts at 1)

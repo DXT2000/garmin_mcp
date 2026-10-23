@@ -9,6 +9,11 @@ import json
 import pytest
 from unittest.mock import Mock
 from mcp.server.fastmcp import FastMCP
+from garminconnect import (
+    GarminConnectAuthenticationError,
+    GarminConnectConnectionError,
+    GarminConnectTooManyRequestsError,
+)
 
 from garmin_mcp import health_wellness
 from tests.fixtures.garmin_responses import (
@@ -464,6 +469,59 @@ async def test_get_energy_balance_gates_out_clustered_leverage(
 
 
 @pytest.mark.asyncio
+async def test_get_energy_balance_daily_weigh_ins_are_not_one_cluster(
+    app_with_health_wellness, mock_garmin_client
+):
+    """28 daily smart-scale readings are each within 48h of a neighbor, but
+    not of each other -- they must not chain into one cluster holding all of
+    the fit's leverage, which would suppress derived for the most common
+    (and best-conditioned) weigh-in pattern there is.
+    """
+    mock_garmin_client.connectapi.side_effect = [
+        _energy_balance_intake_resp([("2024-01-01", 2000, 5)]),
+        _energy_balance_calories_resp([("2024-01-01", 2600)]),
+    ]
+    start = datetime.date(2024, 1, 1)
+    mock_garmin_client.get_body_composition.return_value = {
+        "dateWeightList": [
+            {
+                "calendarDate": (start + datetime.timedelta(days=i)).isoformat(),
+                "weight": 80000.0 - 50.0 * i,  # 50 g/day, perfectly linear
+                "bodyFat": 20.0,
+            }
+            for i in range(28)
+        ]
+    }
+
+    result = await app_with_health_wellness.call_tool(
+        "get_energy_balance",
+        {"start_date": "2024-01-01", "end_date": "2024-01-28"},
+    )
+    data = json.loads(result[0][0].text)
+
+    assert data["body_composition"]["readings_used"] == 28
+    assert "gate_note" not in data
+    # 50 g/day of loss at a constant 20% body fat: 10 g fat + 40 g lean per day
+    assert data["derived"]["implied_deficit_kcal_per_day"] == pytest.approx(
+        0.010 * 7700 + 0.040 * 1800, abs=0.1
+    )
+
+
+def test_body_comp_gate_regular_weigh_ins_pass():
+    """Daily and every-other-day weigh-ins clear the clustering gate."""
+    assert health_wellness._body_comp_gate_failure(list(range(28))) is None
+    assert health_wellness._body_comp_gate_failure(list(range(0, 29, 2))) is None
+
+
+def test_body_comp_gate_still_catches_a_dense_cluster():
+    """A burst of readings inside 48h plus one distant reading is still
+    gated -- including when the burst does not start at the first reading."""
+    assert "cluster" in health_wellness._body_comp_gate_failure([0, 1, 2, 25])
+    assert "cluster" in health_wellness._body_comp_gate_failure([0, 22, 23])
+    assert "cluster" in health_wellness._body_comp_gate_failure([0, 23, 24, 25])
+
+
+@pytest.mark.asyncio
 async def test_get_energy_balance_uncertainty_formula_is_pinned(
     app_with_health_wellness, mock_garmin_client
 ):
@@ -708,8 +766,24 @@ async def test_get_training_readiness_tool(app_with_health_wellness, mock_garmin
         {"date": "2024-01-15"}
     )
 
-    # Verify
-    assert result is not None
+    # Verify -- one curated entry per snapshot, in API order
+    data = json.loads(result[0][0].text)
+    assert [entry["context"] for entry in data] == [
+        "AFTER_WAKEUP_RESET",
+        "AFTER_POST_EXERCISE_RESET",
+    ]
+    morning = data[0]
+    assert morning["date"] == "2024-01-15"
+    assert morning["score"] == 62
+    assert morning["level"] == "MODERATE"
+    assert morning["feedback"] == "WELL_RECOVERED"
+    assert morning["sleep_score"] == 81
+    assert morning["recovery_time_hours"] == 5.5
+    assert morning["acute_load"] == 310
+    assert morning["hrv_weekly_avg"] == 58
+    assert data[1]["score"] == 38
+    assert data[1]["recovery_time_hours"] == 18.0
+    assert "sleep_score" not in data[1]
     mock_garmin_client.get_training_readiness.assert_called_once_with("2024-01-15")
 
 
@@ -880,12 +954,14 @@ async def test_get_sleep_summary_tool(app_with_health_wellness, mock_garmin_clie
     )
 
     # Verify
-    assert result is not None
+    summary = json.loads(result[0][0].text)
+    assert summary["resting_heart_rate_bpm"] == 55
+    assert summary["restless_moments_count"] == 15
+    assert summary["avg_spo2_percent"] == 96
+    assert summary["lowest_spo2_percent"] == 93
     # Note: get_sleep_summary calls get_sleep_data internally
     mock_garmin_client.get_sleep_data.assert_called_once_with("2024-01-15")
 
-    # Verify it's a summary (smaller than full sleep data)
-    # The summary should contain key metrics but not the full time-series data
 
 
 @pytest.mark.asyncio
@@ -923,13 +999,11 @@ async def test_get_sleep_summary_range_tool(app_with_health_wellness, mock_garmi
 async def test_get_sleep_summary_range_skips_nights_without_data(
     app_with_health_wellness, mock_garmin_client
 ):
-    """Nights with no Garmin data (or a per-night error) are skipped, not fatal"""
+    """Nights with no Garmin data are skipped without losing available nights."""
 
     def side_effect(date):
         if date == "2024-01-14":
             return None
-        if date == "2024-01-15":
-            raise Exception("transient API error")
         return MOCK_SLEEP_DATA
 
     mock_garmin_client.get_sleep_data.side_effect = side_effect
@@ -941,8 +1015,9 @@ async def test_get_sleep_summary_range_skips_nights_without_data(
 
     data = json.loads(result[0][0].text)
     assert data["nights_requested"] == 3
-    assert data["nights_returned"] == 1
+    assert data["nights_returned"] == 2
     assert data["nights"][0]["date"] == "2024-01-13"
+    assert data["nights"][1]["date"] == "2024-01-15"
 
 
 @pytest.mark.asyncio
@@ -1188,6 +1263,32 @@ async def test_get_weekly_intensity_minutes_tool(app_with_health_wellness, mock_
 
 
 @pytest.mark.asyncio
+async def test_get_weekly_intensity_minutes_counts_vigorous_double(
+    app_with_health_wellness, mock_garmin_client
+):
+    """total_minutes is compared against weekly_goal, and Garmin counts each
+    vigorous minute twice toward that goal, so the total must too."""
+    mock_garmin_client.get_weekly_intensity_minutes.return_value = MOCK_WEEKLY_INTENSITY_MINUTES
+
+    result = await app_with_health_wellness.call_tool(
+        "get_weekly_intensity_minutes",
+        {"end_date": "2024-01-14", "weeks": 2}
+    )
+
+    data = json.loads(result[0][0].text)
+    latest = data["weekly_data"][0]
+    assert latest["week_start"] == "2024-01-08"
+    assert latest["weekly_goal"] == 150
+    # Raw minutes are reported unweighted
+    assert latest["moderate_minutes"] == 120
+    assert latest["vigorous_minutes"] == 45
+    # 120 + 2 * 45, not the raw sum 165
+    assert latest["total_minutes"] == 210
+    # 90 + 2 * 30 = 150 -- exactly at goal; the raw sum (120) would read as short
+    assert data["weekly_data"][1]["total_minutes"] == 150
+
+
+@pytest.mark.asyncio
 async def test_get_weekly_intensity_minutes_tool_default_weeks(app_with_health_wellness, mock_garmin_client):
     """Test get_weekly_intensity_minutes tool with default weeks parameter"""
     # Setup mock
@@ -1217,9 +1318,40 @@ async def test_get_morning_training_readiness_tool(app_with_health_wellness, moc
         {"date": "2024-01-15"}
     )
 
-    # Verify
-    assert result is not None
+    # Verify -- the score, level and factors come through, not just the date
+    data = json.loads(result[0][0].text)
+    assert data["date"] == "2024-01-15"
+    assert data["context"] == "AFTER_WAKEUP_RESET"
+    assert data["score"] == 62
+    assert data["level"] == "MODERATE"
+    assert data["feedback"] == "WELL_RECOVERED"
+    assert data["sleep_score"] == 81
+    assert data["recovery_time_hours"] == 5.5
+    assert data["hrv_weekly_avg"] == 58
+    assert data["hrv_factor_feedback"] == "GOOD"
+    assert data["acute_load"] == 310
     mock_garmin_client.get_morning_training_readiness.assert_called_once_with("2024-01-15")
+
+
+@pytest.mark.asyncio
+async def test_get_morning_training_readiness_recovery_reached_zero(
+    app_with_health_wellness, mock_garmin_client
+):
+    """REACHED_ZERO means the recovery clock has drained even though Garmin
+    keeps the last assigned minutes in recoveryTime."""
+    mock_garmin_client.get_morning_training_readiness.return_value = {
+        **MOCK_MORNING_TRAINING_READINESS,
+        "recoveryTime": 106,
+        "recoveryTimeChangePhrase": "REACHED_ZERO",
+    }
+
+    result = await app_with_health_wellness.call_tool(
+        "get_morning_training_readiness",
+        {"date": "2024-01-15"}
+    )
+
+    data = json.loads(result[0][0].text)
+    assert data["recovery_time_hours"] == 0.0
 
 
 # Error handling tests
@@ -1421,3 +1553,142 @@ async def test_get_recovery_time_remaining_unavailable(
     data = json.loads(result[0][0].text)
     assert data["state"] == "unavailable"
     assert data["remaining_hours"] is None
+
+
+@pytest.mark.asyncio
+async def test_recovery_time_surfaces_failed_requests_instead_of_empty_sources(
+    app_with_health_wellness, mock_garmin_client
+):
+    from garminconnect import GarminConnectConnectionError
+
+    error = GarminConnectConnectionError("HTTP error: API Error 401 - expired")
+    mock_garmin_client.get_training_readiness.side_effect = error
+    mock_garmin_client.get_morning_training_readiness.side_effect = error
+    mock_garmin_client.get_activities.side_effect = error
+    result = await app_with_health_wellness.call_tool("get_recovery_time_remaining", {})
+    assert result[0][0].text.startswith("Error retrieving recovery time remaining:")
+    assert "401 - expired" in result[0][0].text
+    assert "snapshots were empty" not in result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_get_stats_preserves_zero_floors(app_with_health_wellness, mock_garmin_client):
+    """A measured zero is distinct from a missing floors measurement."""
+    mock_garmin_client.get_stats.return_value = {
+        "calendarDate": "2024-01-15",
+        "totalSteps": 0,
+        "floorsAscended": 0.0,
+        "floorsDescended": 0,
+    }
+    result = await app_with_health_wellness.call_tool("get_stats", {"date": "2024-01-15"})
+    data = json.loads(result[0][0].text)
+    assert data["floors_ascended"] == 0.0
+    assert data["floors_descended"] == 0
+    assert data["total_steps"] == 0
+
+
+@pytest.mark.asyncio
+async def test_get_training_readiness_accepts_single_snapshot(
+    app_with_health_wellness, mock_garmin_client
+):
+    """garminconnect 0.3.2 supports a single dictionary as well as a list."""
+    mock_garmin_client.get_training_readiness.return_value = {
+        "calendarDate": "2024-01-15",
+        "score": 62,
+        "level": "MODERATE",
+        "recoveryTime": 330,
+    }
+    result = await app_with_health_wellness.call_tool(
+        "get_training_readiness", {"date": "2024-01-15"}
+    )
+    assert json.loads(result[0][0].text) == [{
+        "date": "2024-01-15", "score": 62, "level": "MODERATE", "recovery_time_hours": 5.5,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_get_body_battery_preserves_events_with_null_duration(
+    app_with_health_wellness, mock_garmin_client
+):
+    """An unmeasured duration must not discard the other events or days."""
+    mock_garmin_client.get_body_battery.return_value = [
+        {"date": "2024-01-14", "charged": 70, "bodyBatteryActivityEvent": []},
+        {
+            "date": "2024-01-15",
+            "charged": 80,
+            "bodyBatteryActivityEvent": [
+                {"eventType": "SLEEP", "durationInMilliseconds": None, "bodyBatteryImpact": 50},
+                {"eventType": "ACTIVITY", "durationInMilliseconds": 0},
+                {"eventType": "REST", "durationInMilliseconds": 120000},
+            ],
+        },
+    ]
+    result = await app_with_health_wellness.call_tool(
+        "get_body_battery", {"start_date": "2024-01-14", "end_date": "2024-01-15"}
+    )
+    data = json.loads(result[0][0].text)
+    assert [day["charged"] for day in data] == [70, 80]
+    events = data[1]["events"]
+    assert events[0]["type"] == "SLEEP"
+    assert events[0]["body_battery_impact"] == 50
+    assert "duration_minutes" not in events[0]
+    assert events[1]["duration_minutes"] == 0
+    assert events[2]["duration_minutes"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool, arguments", [
+    ("get_sleep_summary", {"date": "2024-01-15"}),
+    ("get_sleep_summary_range", {"start_date": "2024-01-15", "end_date": "2024-01-15"}),
+])
+@pytest.mark.parametrize("metric, expected", [
+    ("resting_heart_rate_bpm", 49),
+    ("restless_moments_count", 0),
+    ("avg_spo2_percent", 95),
+    ("lowest_spo2_percent", 89),
+])
+async def test_sleep_summaries_accept_top_level_metrics_and_uppercase_spo2(
+    app_with_health_wellness, mock_garmin_client, tool, arguments, metric, expected
+):
+    """Retain physiology supplied outside dailySleepDTO and with SPO2 casing."""
+    mock_garmin_client.get_sleep_data.return_value = {
+        "dailySleepDTO": {"sleepTimeSeconds": 25200},
+        "restingHeartRate": 49,
+        "restlessMomentsCount": 0,
+        "wellnessSpO2SleepSummaryDTO": {"averageSPO2": 95, "lowestSPO2": 89},
+    }
+    result = await app_with_health_wellness.call_tool(tool, arguments)
+    data = json.loads(result[0][0].text)
+    summary = data["nights"][0] if tool.endswith("range") else data
+    assert summary[metric] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [
+    Exception("transient API error"),
+    GarminConnectAuthenticationError("expired"),
+    GarminConnectTooManyRequestsError("rate limited"),
+    GarminConnectConnectionError("HTTP error: API Error 401 - expired"),
+    GarminConnectConnectionError("HTTP error: API Error 429 - rate limited"),
+])
+async def test_sleep_summary_range_surfaces_request_failures(
+    app_with_health_wellness, mock_garmin_client, error
+):
+    """Authentication and transport failures are errors, rather than absent sleep."""
+    mock_garmin_client.get_sleep_data.side_effect = error
+    result = await app_with_health_wellness.call_tool(
+        "get_sleep_summary_range", {"start_date": "2024-01-13", "end_date": "2024-01-15"}
+    )
+    text = result[0][0].text
+    assert text.startswith("Error retrieving sleep data for 2024-01-13:")
+    assert str(error) in text
+    mock_garmin_client.get_sleep_data.assert_called_once_with("2024-01-13")
+
+
+@pytest.mark.asyncio
+async def test_training_readiness_empty_dictionary_remains_no_data(
+    app_with_health_wellness, mock_garmin_client
+):
+    mock_garmin_client.get_training_readiness.return_value = {}
+    result = await app_with_health_wellness.call_tool("get_training_readiness", {"date": "2024-01-15"})
+    assert result[0][0].text == "No training readiness data found for 2024-01-15"

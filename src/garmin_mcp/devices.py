@@ -430,4 +430,30 @@ def register_tools(app):
                 "message": f"Failed to push workout: {str(e)}",
             }, indent=2)
 
+    @app.tool()
+    async def get_sensors() -> str:
+        """Get paired external sensors (heart-rate straps, power meters, ...)
+        with battery level and when each last connected
+        """
+        try:
+            sensors = garmin_client.get_sensors() or []
+            curated = [
+                {k: v for k, v in {
+                    "name": s.get("deviceName"),
+                    "type": s.get("sensorType"),
+                    "manufacturer": s.get("manufacturer"),
+                    "battery_status": s.get("batteryStatus"),
+                    "battery_percent": s.get("batteryLevel"),
+                    "last_connected": s.get("lastConnected"),
+                    "serial_number": s.get("serialNumber"),
+                    "software_version": s.get("softwareVersion"),
+                }.items() if v is not None}
+                for s in sensors if isinstance(s, dict)
+            ]
+            if not curated:
+                return "No paired sensors found."
+            return json.dumps({"count": len(curated), "sensors": curated}, indent=2)
+        except Exception as e:
+            return f"Error retrieving sensors: {str(e)}"
+
     return app

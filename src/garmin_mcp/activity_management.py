@@ -29,6 +29,62 @@ def sanitize_lap_distance(value):
 garmin_client = None
 
 
+
+def _pace_per_100m(seconds: Optional[float], meters: Optional[float]) -> Optional[str]:
+    if not seconds or not meters:
+        return None
+    per_100 = round(seconds * 100 / meters)
+    return f"{per_100 // 60}:{per_100 % 60:02d}"
+
+
+def _swim_lengths(details: Dict[str, Any]) -> Dict[str, Any]:
+    """Decode swimDetails' metric table into pool lengths and rests.
+
+    Columns are looked up by descriptor key, not position. A row with
+    directActive 1 is a length; any other row is a rest.
+    """
+    index = {
+        d.get("key"): d.get("metricsIndex")
+        for d in details.get("metricDescriptors") or [] if isinstance(d, dict)
+    }
+
+    def value(row: Dict[str, Any], key: str) -> Any:
+        i = index.get(key)
+        metrics = row.get("metrics") or []
+        return metrics[i] if isinstance(i, int) and i < len(metrics) else None
+
+    lengths: List[Dict[str, Any]] = []
+    rests: List[Dict[str, Any]] = []
+    for row in details.get("activityDetailMetrics") or []:
+        if not isinstance(row, dict):
+            continue
+        seconds = value(row, "sumDuration")
+        if value(row, "directActive") == 1:
+            distance = value(row, "sumDistance")
+            entry = {
+                "length": len(lengths) + 1,
+                "distance_m": distance,
+                "seconds": round(seconds, 1) if seconds is not None else None,
+                "pace_per_100m": _pace_per_100m(seconds, distance),
+                "strokes": value(row, "sumStrokes"),
+                "swolf": value(row, "weightedMeanSwolf"),
+                "avg_hr": value(row, "weightedMeanHeartRate"),
+                "max_hr": value(row, "maxHeartRate"),
+            }
+            lengths.append({k: v for k, v in entry.items() if v is not None})
+        elif seconds:
+            rests.append({"after_length": len(lengths), "seconds": round(seconds, 1)})
+    swolfs = [l["swolf"] for l in lengths if isinstance(l.get("swolf"), (int, float))]
+    return {
+        "lengths_count": len(lengths),
+        "swim_seconds": round(sum(l.get("seconds") or 0 for l in lengths), 1),
+        "rest_seconds": round(sum(r["seconds"] for r in rests), 1),
+        "avg_swolf": round(sum(swolfs) / len(swolfs), 1) if swolfs else None,
+        "lengths": lengths,
+        "rests": rests,
+    }
+
+
 def configure(client):
     """Configure the module with the Garmin client instance"""
     global garmin_client
@@ -1275,5 +1331,116 @@ def register_tools(app):
             return json.dumps(curated, indent=2)
         except Exception as e:
             return f"Error retrieving activity types: {str(e)}"
+
+    @app.tool()
+    async def get_activity_swim_lengths(activity_id: int) -> str:
+        """Get a pool swim length by length: time, pace /100 m, strokes,
+        SWOLF and heart rate per length, plus the rests between them
+
+        Args:
+            activity_id: ID of a lap-swimming activity
+        """
+        try:
+            details = garmin_client.get_activity_swim_details(activity_id)
+            if not isinstance(details, dict) or not details.get("activityDetailMetrics"):
+                return f"No swim lengths for activity {activity_id} (not a pool swim?)."
+            return json.dumps(
+                {"activity_id": activity_id, **_swim_lengths(details)}, indent=2
+            )
+        except Exception as e:
+            return f"Error retrieving swim lengths: {str(e)}"
+
+    @app.tool()
+    async def search_activities(
+        text: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        min_distance_km: Optional[float] = None,
+        max_distance_km: Optional[float] = None,
+        limit: int = 20,
+    ) -> str:
+        """Search activities like the Garmin Connect activity list: free text
+        in the name, type, date range and distance range
+
+        Args:
+            text: Text to search for in activity names, e.g. "Tempo"
+            activity_type: Garmin activity type, e.g. "running", "lap_swimming"
+            start_date: From, YYYY-MM-DD
+            end_date: Until, YYYY-MM-DD
+            min_distance_km: Minimum distance in km
+            max_distance_km: Maximum distance in km
+            limit: Maximum results (1-100, default 20)
+        """
+        try:
+            filters = {
+                "search": text,
+                "activityType": activity_type,
+                "startDate": start_date,
+                "endDate": end_date,
+                "minDistance": round(min_distance_km * 1000) if min_distance_km is not None else None,
+                "maxDistance": round(max_distance_km * 1000) if max_distance_km is not None else None,
+            }
+            filters = {k: v for k, v in filters.items() if v is not None}
+            activities = garmin_client.search_activities(
+                start=0, limit=min(max(1, limit), 100), **filters
+            ) or []
+            curated = []
+            for a in activities:
+                if not isinstance(a, dict):
+                    continue
+                distance, duration = a.get("distance"), a.get("duration")
+                curated.append({
+                    "activity_id": a.get("activityId"),
+                    "name": a.get("activityName"),
+                    "type": (a.get("activityType") or {}).get("typeKey"),
+                    "start_time_local": a.get("startTimeLocal"),
+                    "distance_km": round(distance / 1000, 2) if distance else None,
+                    "duration_min": round(duration / 60, 1) if duration else None,
+                })
+            if not curated:
+                return "No activities match the search."
+            return json.dumps({"count": len(curated), "activities": curated}, indent=2)
+        except Exception as e:
+            return f"Error searching activities: {str(e)}"
+
+    @app.tool()
+    async def upload_activity_file(file_path: str, as_import: bool = True) -> str:
+        """Upload a FIT, GPX or TCX file from this computer as a new activity
+
+        It becomes a new activity, so it can change training load and
+        statistics. With as_import=true (default) it is uploaded as an
+        import, which Garmin does not re-export to connected apps such as
+        Strava; false uploads it as a normal activity.
+
+        Garmin's reply has no activity id, and it may rename the activity
+        (a GPX walk came back named after its location); find the result with
+        get_activities_by_date for the file's date.
+
+        Args:
+            file_path: Absolute path to a .fit, .gpx or .tcx file
+            as_import: Upload as an import (default true)
+        """
+        try:
+            import os
+            path = os.path.abspath(os.path.expanduser(file_path))
+            if os.path.splitext(path)[1].lower() not in (".fit", ".gpx", ".tcx"):
+                return "Error uploading activity: only .fit, .gpx or .tcx files are accepted."
+            if not os.path.isfile(path):
+                return f"Error uploading activity: file not found: {path}"
+            if as_import:
+                result = garmin_client.import_activity(path)
+            else:
+                result = garmin_client.upload_activity(path)
+            if hasattr(result, "json"):
+                result = result.json()
+            return json.dumps({
+                "status": "success",
+                "file": path,
+                "as_import": as_import,
+                "result": result if isinstance(result, (dict, list)) else str(result),
+            }, indent=2, default=str)
+        except Exception as e:
+            return f"Error uploading activity: {str(e)}"
 
     return app

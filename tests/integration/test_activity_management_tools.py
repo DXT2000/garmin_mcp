@@ -1476,3 +1476,113 @@ async def test_delete_activity_exception(
 
     assert "Error deleting activity" in result[0][0].text
     assert "Garmin API error" in result[0][0].text
+
+
+# --- swim lengths, search, upload -------------------------------------------
+
+SWIM_DETAILS = {
+    "metricDescriptors": [
+        {"metricsIndex": 0, "key": "sumDistance"},
+        {"metricsIndex": 1, "key": "sumDuration"},
+        {"metricsIndex": 2, "key": "weightedMeanHeartRate"},
+        {"metricsIndex": 3, "key": "sumStrokes"},
+        {"metricsIndex": 4, "key": "directActive"},
+        {"metricsIndex": 5, "key": "weightedMeanSwolf"},
+    ],
+    "activityDetailMetrics": [
+        {"metrics": [25.0, 42.75, 91.0, 14.0, 1.0, 57.0]},
+        {"metrics": [25.0, 35.0, 107.0, 13.0, 1.0, 48.0]},
+        {"metrics": [None, 20.066, 117.0, None, 0.0, None]},
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_get_activity_swim_lengths_decodes_by_descriptor_key(
+    app_with_activity_management, mock_garmin_client
+):
+    mock_garmin_client.get_activity_swim_details.return_value = SWIM_DETAILS
+    payload = json.loads((await app_with_activity_management.call_tool(
+        "get_activity_swim_lengths", {"activity_id": 1}
+    ))[0][0].text)
+    assert payload["lengths_count"] == 2 and payload["avg_swolf"] == 52.5
+    assert payload["lengths"][0] == {
+        "length": 1, "distance_m": 25.0, "seconds": 42.8, "pace_per_100m": "2:51",
+        "strokes": 14.0, "swolf": 57.0, "avg_hr": 91.0,
+    }
+    assert payload["rests"] == [{"after_length": 2, "seconds": 20.1}]
+
+
+@pytest.mark.asyncio
+async def test_get_activity_swim_lengths_not_a_swim(app_with_activity_management, mock_garmin_client):
+    mock_garmin_client.get_activity_swim_details.return_value = {"activityDetailMetrics": None}
+    result = await app_with_activity_management.call_tool("get_activity_swim_lengths", {"activity_id": 1})
+    assert "No swim lengths" in result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_get_activity_swim_lengths_exception(app_with_activity_management, mock_garmin_client):
+    mock_garmin_client.get_activity_swim_details.side_effect = Exception("API Error")
+    result = await app_with_activity_management.call_tool("get_activity_swim_lengths", {"activity_id": 1})
+    assert "Error retrieving swim lengths" in result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_search_activities_maps_filters_to_garmin_params(
+    app_with_activity_management, mock_garmin_client
+):
+    mock_garmin_client.search_activities.return_value = [{
+        "activityId": 9, "activityName": "Tempo", "activityType": {"typeKey": "running"},
+        "startTimeLocal": "2026-10-07 19:40:35", "distance": 6594.96, "duration": 2400.0,
+    }]
+    payload = json.loads((await app_with_activity_management.call_tool("search_activities", {
+        "text": "Tempo", "activity_type": "running", "min_distance_km": 5, "limit": 500,
+    }))[0][0].text)
+    assert payload["activities"][0]["distance_km"] == 6.59
+    mock_garmin_client.search_activities.assert_called_once_with(
+        start=0, limit=100, search="Tempo", activityType="running", minDistance=5000
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_activities_exception(app_with_activity_management, mock_garmin_client):
+    mock_garmin_client.search_activities.side_effect = Exception("API Error")
+    result = await app_with_activity_management.call_tool("search_activities", {"text": "x"})
+    assert "Error searching activities" in result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_upload_activity_file_imports_by_default(
+    app_with_activity_management, mock_garmin_client, tmp_path
+):
+    gpx = tmp_path / "walk.gpx"
+    gpx.write_text("<gpx/>")
+    mock_garmin_client.import_activity.return_value = {"status": "uploaded", "fileName": "walk.gpx"}
+    payload = json.loads((await app_with_activity_management.call_tool(
+        "upload_activity_file", {"file_path": str(gpx)}
+    ))[0][0].text)
+    assert payload["status"] == "success" and payload["as_import"] is True
+    mock_garmin_client.import_activity.assert_called_once_with(str(gpx))
+    mock_garmin_client.upload_activity.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_upload_activity_file_refuses_other_extensions(
+    app_with_activity_management, mock_garmin_client, tmp_path
+):
+    other = tmp_path / "notes.txt"
+    other.write_text("x")
+    result = await app_with_activity_management.call_tool("upload_activity_file", {"file_path": str(other)})
+    assert "only .fit, .gpx or .tcx" in result[0][0].text
+    mock_garmin_client.import_activity.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_upload_activity_file_exception(app_with_activity_management, mock_garmin_client, tmp_path):
+    fit = tmp_path / "ride.fit"
+    fit.write_bytes(b"x")
+    mock_garmin_client.upload_activity.side_effect = Exception("API Error")
+    result = await app_with_activity_management.call_tool(
+        "upload_activity_file", {"file_path": str(fit), "as_import": False}
+    )
+    assert "Error uploading activity" in result[0][0].text

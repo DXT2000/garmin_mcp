@@ -1245,3 +1245,24 @@ async def test_menstrual_calendar_deduplicates_cycles_crossing_chunk_seam(
 
     assert json.loads(result[0][0].text) == wrap([before, spanning, after])
     assert mock_garmin_client.get_menstrual_calendar_data.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_sensors_curates(app_with_devices, mock_garmin_client):
+    mock_garmin_client.get_sensors.return_value = [{
+        "deviceName": "HRM 600", "sensorType": "HEART_RATE", "batteryStatus": "OK",
+        "batteryLevel": 42, "lastConnected": "2026-10-25T12:01:48.0", "manufacturer": "GARMIN",
+        "imageUrl": "https://example.invalid/x.png",
+    }]
+    payload = json.loads((await app_with_devices.call_tool("get_sensors", {}))[0][0].text)
+    assert payload["sensors"][0] == {
+        "name": "HRM 600", "type": "HEART_RATE", "manufacturer": "GARMIN",
+        "battery_status": "OK", "battery_percent": 42, "last_connected": "2026-10-25T12:01:48.0",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_sensors_exception(app_with_devices, mock_garmin_client):
+    mock_garmin_client.get_sensors.side_effect = Exception("API Error")
+    result = await app_with_devices.call_tool("get_sensors", {})
+    assert "Error retrieving sensors" in result[0][0].text

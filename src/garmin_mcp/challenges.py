@@ -773,4 +773,34 @@ def register_tools(app):
         except Exception as e:
             return f"Error retrieving in-progress virtual challenges: {str(e)}"
 
+    @app.tool()
+    async def get_activity_personal_records(activity_id: int) -> str:
+        """Get the personal records (PRs) one activity set
+
+        record is Garmin's own label for the PR type (e.g. "1k run").
+
+        Args:
+            activity_id: Activity ID
+        """
+        try:
+            records = garmin_client.get_personal_records_for_activity(activity_id) or []
+            curated = []
+            for r in records:
+                if not isinstance(r, dict):
+                    continue
+                label_key = r.get("prTypeLabelKey") or ""
+                pr_info = PR_TYPE_MAPPING.get(r.get("typeId"))
+                curated.append({
+                    "record": label_key.removeprefix("pr.label.").replace(".", " ") or None,
+                    "type_id": r.get("typeId"),
+                    "value": r.get("value"),
+                    "formatted": _format_pr_value(r.get("value"), pr_info[1]) if pr_info else None,
+                    "status": r.get("status"),
+                })
+            if not curated:
+                return f"No personal records set in activity {activity_id}."
+            return json.dumps({"activity_id": activity_id, "records": curated}, indent=2)
+        except Exception as e:
+            return f"Error retrieving activity personal records: {str(e)}"
+
     return app

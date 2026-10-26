@@ -586,3 +586,23 @@ async def test_get_personal_record_exception(app_with_challenges, mock_garmin_cl
     # Verify error is handled gracefully
     assert result is not None
     # Should return error message, not crash
+
+
+@pytest.mark.asyncio
+async def test_get_activity_personal_records_uses_garmin_label(app_with_challenges, mock_garmin_client):
+    mock_garmin_client.get_personal_records_for_activity.return_value = [
+        {"typeId": 1, "value": 273.16, "status": "ACCEPTED", "prTypeLabelKey": "pr.label.1k.run"},
+    ]
+    payload = json.loads((await app_with_challenges.call_tool(
+        "get_activity_personal_records", {"activity_id": 5}
+    ))[0][0].text)
+    assert payload["records"] == [{
+        "record": "1k run", "type_id": 1, "value": 273.16, "formatted": "4:33", "status": "ACCEPTED",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_get_activity_personal_records_exception(app_with_challenges, mock_garmin_client):
+    mock_garmin_client.get_personal_records_for_activity.side_effect = Exception("API Error")
+    result = await app_with_challenges.call_tool("get_activity_personal_records", {"activity_id": 5})
+    assert "Error retrieving activity personal records" in result[0][0].text

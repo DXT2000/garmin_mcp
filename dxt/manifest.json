@@ -408,6 +408,10 @@
       "description": "Get Garmin Connect goals (active, future, or past)."
     },
     {
+      "name": "get_health_recordings",
+      "description": "Get on-demand health recordings: ECG readings, Health Snapshot"
+    },
+    {
       "name": "get_heart_rate_zones",
       "description": "Get the user's saved heart-rate training-zone configuration."
     },

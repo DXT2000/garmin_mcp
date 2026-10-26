@@ -1711,3 +1711,62 @@ async def test_training_readiness_empty_dictionary_remains_no_data(
     mock_garmin_client.get_training_readiness.return_value = {}
     result = await app_with_health_wellness.call_tool("get_training_readiness", {"date": "2024-01-15"})
     assert result[0][0].text == "No training readiness data found for 2024-01-15"
+
+
+# --- get_health_recordings ----------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_health_recordings_ecg_summary_without_waveform(app_with_health_wellness, mock_garmin_client):
+    mock_garmin_client.get_ecg_list.return_value = {"content": [{
+        "detailId": "e98d", "startTimeLocal": "2026-05-20T11:48:20.0",
+        "rhythmClassification": "SINUS_NORMAL", "heartRateAverage": 64.0, "rmssdHrv": 52,
+        "symptoms": [], "deviceInfo": {"productName": "FR970"}, "udi": "(01)x",
+    }]}
+    payload = json.loads((await app_with_health_wellness.call_tool("get_health_recordings", {
+        "kind": "ecg", "start_date": "2026-01-01", "end_date": "2026-10-26",
+    }))[0][0].text)
+    assert payload["recordings"] == [{
+        "ecg_id": "e98d", "start_time_local": "2026-05-20T11:48:20.0", "rhythm": "SINUS_NORMAL",
+        "avg_heart_rate": 64.0, "rmssd_hrv_ms": 52, "device": "FR970",
+    }]
+    mock_garmin_client.get_ecg_list.assert_called_once_with(start="2026-01-01", end="2026-10-26", page_size=50)
+
+
+@pytest.mark.asyncio
+async def test_get_health_recordings_snapshot_keeps_scalars_and_uuid(app_with_health_wellness, mock_garmin_client):
+    mock_garmin_client.get_health_snapshots_range.return_value = [{
+        "activityUuid": {"uuid": "abc"}, "startTimeLocal": "2026-10-01T08:00:00", "avgHeartRate": 55,
+        "samples": [1, 2, 3],
+    }]
+    payload = json.loads((await app_with_health_wellness.call_tool("get_health_recordings", {
+        "kind": "health_snapshot", "start_date": "2026-10-01", "end_date": "2026-10-02",
+    }))[0][0].text)
+    assert payload["recordings"] == [{
+        "startTimeLocal": "2026-10-01T08:00:00", "avgHeartRate": 55, "snapshot_uuid": "abc",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_get_health_recordings_naps_is_one_day(app_with_health_wellness, mock_garmin_client):
+    mock_garmin_client.get_naps.return_value = []
+    result = await app_with_health_wellness.call_tool(
+        "get_health_recordings", {"kind": "naps", "start_date": "2026-10-25", "end_date": "2026-10-30"}
+    )
+    assert "No naps recorded on 2026-10-25" in result[0][0].text
+    mock_garmin_client.get_naps.assert_called_once_with("2026-10-25")
+
+
+@pytest.mark.asyncio
+async def test_get_health_recordings_rejects_long_range(app_with_health_wellness, mock_garmin_client):
+    result = await app_with_health_wellness.call_tool("get_health_recordings", {
+        "kind": "glucose", "start_date": "2024-01-01", "end_date": "2026-01-01",
+    })
+    assert "at most 366 days" in result[0][0].text
+    mock_garmin_client.get_glucose_data_range.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_health_recordings_exception(app_with_health_wellness, mock_garmin_client):
+    mock_garmin_client.get_glucose_data_range.side_effect = Exception("API Error")
+    result = await app_with_health_wellness.call_tool("get_health_recordings", {"kind": "glucose"})
+    assert "Error retrieving glucose" in result[0][0].text

@@ -30,7 +30,7 @@ Garmin's API is accessed via the awesome [python-garminconnect](https://github.c
 This MCP server registers **150+ tools** across 17 functional modules on top of the [python-garminconnect](https://github.com/cyberjunky/python-garminconnect) library (pinned in `pyproject.toml`):
 
 - ✅ Activity Management (26 tools) - includes write tools for type, description, event type, perceived effort, feel, and exercise sets; pool swims length by length; search; uploading FIT/GPX/TCX files
-- ✅ Health & Wellness (33 tools) - includes custom lightweight summary tools
+- ✅ Health & Wellness (34 tools) - includes custom lightweight summary tools, and ECG / Health Snapshot / glucose / nap recordings
 - ✅ Training & Performance (25 tools) - includes CTL/ATL/TSB, HRV, VO2 max, respiration trends, Critical Swim Speed, cycling ability, running economy, FTP history, power zones (read and set), per-activity power curve and fastest splits
 - ✅ Workouts (19 tools) - includes rescheduling, editing in place (`update_workout`) and copying workouts
 - ✅ Devices (8 tools) - includes sending a workout to a device and paired sensors with battery level
@@ -131,7 +131,7 @@ If you need any of these endpoints, please [open an issue](https://github.com/Ta
 
 ## Tool Filtering
 
-This server registers 192 tools by default, which is a lot of context for an
+This server registers 193 tools by default, which is a lot of context for an
 LLM to carry in every session. You can expose only the tools you need with
 three optional environment variables:
 
@@ -151,7 +151,7 @@ stops the server at startup with the list of known profiles.
 | Profile | Tools | What it covers |
 |---|---:|---|
 | `minimal` | 20 | Recent activities with splits, daily stats, sleep, HRV, stress, body battery, training readiness and status |
-| `health` | 53 | Every health_wellness tool plus weight, body composition, blood pressure, hydration, women's health, fitness age, HRV and respiration trends |
+| `health` | 54 | Every health_wellness tool plus weight, body composition, blood pressure, hydration, women's health, fitness age, HRV and respiration trends |
 | `activities` | 55 | Activity list, search, detail, splits, swim lengths, PRs, edits and uploads; sensors; FIT analysis and power curve; gear; courses |
 | `workouts` | 40 | Workout library, upload, schedule and delete; the high-level builders; the exercise catalog; the calendar |
 | `training` | 45 | Training status, load, effect, VO2max, FTP and power zones, CSS, cycling ability, running economy, lactate threshold, endurance and hill scores, readiness, recovery time, personal records, race predictions, goals, badges |

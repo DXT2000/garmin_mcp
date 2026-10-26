@@ -3,7 +3,7 @@ Health & Wellness Data functions for Garmin Connect MCP Server
 """
 import json
 import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 # The garmin_client will be set by the main file
 garmin_client = None
@@ -1745,5 +1745,82 @@ def register_tools(app):
             return json.dumps(curated, indent=2)
         except Exception as e:
             return f"Error retrieving recovery time remaining: {str(e)}"
+
+    @app.tool()
+    async def get_health_recordings(
+        kind: Literal["ecg", "health_snapshot", "glucose", "naps"],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> str:
+        """Get on-demand health recordings: ECG readings, Health Snapshot
+        sessions, logged glucose readings, or naps
+
+        ecg, health_snapshot and glucose cover start_date..end_date (default:
+        the last 30 days, at most 366). naps covers the single day start_date
+        (default today). ECG entries are the summary Garmin shows (rhythm,
+        average heart rate, HRV), without the waveform.
+
+        Args:
+            kind: "ecg", "health_snapshot", "glucose" or "naps"
+            start_date: YYYY-MM-DD
+            end_date: YYYY-MM-DD (default today)
+        """
+        try:
+            end = datetime.date.fromisoformat(end_date) if end_date else datetime.date.today()
+            if kind == "naps":
+                day = start_date or datetime.date.today().isoformat()
+                naps = garmin_client.get_naps(day) or []
+                if not naps:
+                    return f"No naps recorded on {day}."
+                return json.dumps({"kind": kind, "date": day, "naps": naps}, indent=2)
+
+            start = (
+                datetime.date.fromisoformat(start_date) if start_date
+                else end - datetime.timedelta(days=30)
+            )
+            if start > end:
+                return f"Error retrieving {kind}: start_date must be on or before end_date"
+            if (end - start).days > 366:
+                return f"Error retrieving {kind}: date range must be at most 366 days"
+            s, e = start.isoformat(), end.isoformat()
+
+            if kind == "ecg":
+                raw = garmin_client.get_ecg_list(start=s, end=e, page_size=50) or {}
+                entries = [
+                    {k: v for k, v in {
+                        "ecg_id": r.get("detailId"),
+                        "start_time_local": r.get("startTimeLocal"),
+                        "rhythm": r.get("rhythmClassification"),
+                        "avg_heart_rate": r.get("heartRateAverage"),
+                        "rmssd_hrv_ms": r.get("rmssdHrv"),
+                        "symptoms": r.get("symptoms") or None,
+                        "device": (r.get("deviceInfo") or {}).get("productName"),
+                    }.items() if v is not None}
+                    for r in raw.get("content") or [] if isinstance(r, dict)
+                ]
+            elif kind == "health_snapshot":
+                entries = []
+                for r in garmin_client.get_health_snapshots_range(s, e) or []:
+                    if not isinstance(r, dict):
+                        continue
+                    # Keep the session summary's scalar fields; nested
+                    # structures are per-sample detail.
+                    entry = {k: v for k, v in r.items() if not isinstance(v, (dict, list))}
+                    uuid = (r.get("activityUuid") or {}).get("uuid")
+                    if uuid:
+                        entry["snapshot_uuid"] = uuid
+                    entries.append(entry)
+            else:
+                raw = garmin_client.get_glucose_data_range(s, e) or {}
+                entries = [g for g in raw.get("glucoseList") or [] if isinstance(g, dict)]
+
+            if not entries:
+                return f"No {kind} recordings between {s} and {e}."
+            return json.dumps({
+                "kind": kind, "start_date": s, "end_date": e,
+                "count": len(entries), "recordings": entries,
+            }, indent=2)
+        except Exception as e:
+            return f"Error retrieving {kind}: {str(e)}"
 
     return app

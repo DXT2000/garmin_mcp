@@ -176,6 +176,7 @@ READ_ONLY_TOOLS = frozenset(
         "get_gear_details",
         "get_gear_types",
         "get_goals",
+        "get_health_recordings",
         "get_heart_rate_zones",
         "get_heart_rates",
         "get_heart_rates_summary",

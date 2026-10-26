@@ -96,6 +96,14 @@
       "description": "Get total count of activities in the user's Garmin account"
     },
     {
+      "name": "create_calendar_event",
+      "description": "Add a race or event to the Garmin Connect calendar (private to you)"
+    },
+    {
+      "name": "create_calendar_note",
+      "description": "Add a note to a day on the Garmin Connect calendar"
+    },
+    {
       "name": "create_custom_food",
       "description": "Create a custom food in the user's Garmin nutrition library"
     },
@@ -130,6 +138,14 @@
     {
       "name": "delete_activity",
       "description": "Permanently delete an activity from Garmin Connect."
+    },
+    {
+      "name": "delete_calendar_event",
+      "description": "Delete a race or event from the calendar"
+    },
+    {
+      "name": "delete_calendar_note",
+      "description": "Delete a calendar note"
     },
     {
       "name": "delete_course",
@@ -274,6 +290,10 @@
     {
       "name": "get_calendar_events",
       "description": "Get races and events on the Garmin Connect calendar between two dates"
+    },
+    {
+      "name": "get_calendar_week",
+      "description": "Get everything on the Garmin calendar for one week (Monday-Sunday):"
     },
     {
       "name": "get_course_details",
@@ -730,6 +750,14 @@
     {
       "name": "unschedule_workouts",
       "description": "Remove multiple scheduled workouts from the Garmin Connect calendar"
+    },
+    {
+      "name": "update_calendar_event",
+      "description": "Change a race or event on the calendar; only the fields you pass change"
+    },
+    {
+      "name": "update_calendar_note",
+      "description": "Change a calendar note; only the fields you pass change"
     },
     {
       "name": "update_custom_food",

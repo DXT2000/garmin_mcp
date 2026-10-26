@@ -20,6 +20,8 @@ ADDITIVE_TOOLS = frozenset(
         "add_weigh_in",
         "add_weigh_in_with_timestamps",
         "copy_workout",
+        "create_calendar_event",
+        "create_calendar_note",
         "create_custom_food",
         "create_gear",
         "create_manual_activity",
@@ -53,6 +55,8 @@ ADDITIVE_TOOLS = frozenset(
 DESTRUCTIVE_TOOLS = frozenset(
     {
         "delete_activity",
+        "delete_calendar_event",
+        "delete_calendar_note",
         "delete_course",
         "delete_custom_food",
         "delete_food_log",
@@ -76,6 +80,8 @@ DESTRUCTIVE_TOOLS = frozenset(
         "set_perceived_effort",
         "unschedule_workout",
         "unschedule_workouts",
+        "update_calendar_event",
+        "update_calendar_note",
         "update_custom_food",
         "update_gear",
         "update_workout",
@@ -92,6 +98,8 @@ IDEMPOTENT_TOOLS = frozenset(
         "schedule_week",
         "schedule_workout",
         "set_gear_status",
+        "update_calendar_event",
+        "update_calendar_note",
         "update_gear",
         "update_workout",
     }
@@ -136,6 +144,7 @@ READ_ONLY_TOOLS = frozenset(
         "get_body_battery_events",
         "get_body_composition",
         "get_calendar_events",
+        "get_calendar_week",
         "get_course_details",
         "get_courses",
         "get_custom_food_serving_units",

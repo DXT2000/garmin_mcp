@@ -45,7 +45,7 @@ This MCP server registers **150+ tools** across 17 functional modules on top of 
 - ✅ Activity Analysis (3 tools) - FIT file parsing, Power Duration Curve; requires power meter and/or Di2
 - ✅ Activity File Downloads (2 tools) - download activity files in FIT, GPX, TCX, or CSV format
 - ✅ Data Management (3 tools) - upload body composition, hydration, and blood pressure
-- ✅ Calendar Events (1 tool) - scheduled activities, workouts, and events
+- ✅ Calendar Events (8 tools) - races (list with ids, add, edit, delete), calendar notes, and the whole week (workouts, notes, races)
 - ✅ Exercise Catalog (3 tools) - browse, match, and batch-resolve public Garmin strength-exercise identifiers without account authentication
 
 The tool list is generated from these registrations by `scripts/generate_dxt_tools.py` and included in `dxt/manifest.json`. Activity Analysis and Activity File Downloads share one module.
@@ -131,7 +131,7 @@ If you need any of these endpoints, please [open an issue](https://github.com/Ta
 
 ## Tool Filtering
 
-This server registers 173 tools by default, which is a lot of context for an
+This server registers 180 tools by default, which is a lot of context for an
 LLM to carry in every session. You can expose only the tools you need with
 three optional environment variables:
 
@@ -153,7 +153,7 @@ stops the server at startup with the list of known profiles.
 | `minimal` | 20 | Recent activities with splits, daily stats, sleep, HRV, stress, body battery, training readiness and status |
 | `health` | 53 | Every health_wellness tool plus weight, body composition, blood pressure, hydration, women's health, fitness age, HRV and respiration trends |
 | `activities` | 50 | Activity list, detail, splits and edits; FIT analysis and power curve; gear; courses |
-| `workouts` | 33 | Workout library, upload, schedule and delete; the high-level builders; the exercise catalog; the calendar |
+| `workouts` | 40 | Workout library, upload, schedule and delete; the high-level builders; the exercise catalog; the calendar |
 | `training` | 38 | Training status, load, effect, VO2max, FTP, lactate threshold, endurance and hill scores, readiness, recovery time, personal records, race predictions, goals, badges |
 | `nutrition` | 23 | Food log, custom foods, daily nutrition settings, hydration, energy balance |
 

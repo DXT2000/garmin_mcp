@@ -83,9 +83,8 @@ upstream's merged version unless it drops a fork decision recorded above.
 
 Left for later, each its own change:
 
-- **#476 `update_workout`** — edit a workout in place instead of delete +
-  re-upload (which changes its id and drops its calendar entries). Conflicts with
-  current main.
+- **#476 `update_workout`** — done differently: the fork wraps garminconnect's own
+  `update_workout` (fork PR #14), so #476 itself is no longer needed.
 - **#481 Garmin Personal API** — Garmin's official read-only API (opened
   2026-10-21) as a second backend beside the SSO login. Large; evaluate before
   copying.
@@ -99,3 +98,27 @@ Upstream comments worth posting (not posted; each needs the user's go-ahead):
 #194 (same fix as fork #5, verified independently), #345 and #344 (the fork's
 measured garminconnect 0.3.20 and mcp 2.x results), #422 (likely fixed by
 garminconnect 0.3.20).
+
+## garminconnect endpoints deliberately not wrapped
+
+Fork PRs #14-#18 wrapped most of garminconnect 0.3.20's unused endpoints. These
+were looked at and left out; check the reason before adding one.
+
+- **Already covered by an existing tool**: `get_scheduled_workouts_by_period`
+  (adds only Garmin Coach adaptive plans), `get_next_scheduled_workout`,
+  `get_primary_event`, `get_upcoming_events`, `get_calendar_event`,
+  `move_calendar_item`, `get_heart_rate_zones_v2`, `update_heart_rate_zones`,
+  `get_current_biometrics`, `get_daily_training_status`,
+  `get_weekly_training_status`, `get_activity_laps`, `update_activity`,
+  `get_last_activity`, `get_hydration_all_data`, `get_daily_sleep` (same payload
+  as `get_sleep_data`), `get_activity_gear_v2`, `set_gear_default`.
+- **Returned no data when checked**: `get_activity_step_details`
+  (detailsAvailable false; `get_activity_splits` carries wktStepIndex per lap
+  instead), `get_pace_bands`.
+- **Not needed for current use**: the jet-lag adviser (`get_jetlag_*`,
+  `add/update/delete_jetlag_trip`); ECG waveforms (`get_ecg` detail, ~50k chars)
+  and Health Snapshot epochs/FIT downloads, since `get_health_recordings` lists
+  the summaries.
+- **Out of scope**: Garmin Coach training plans, golf, badges, privacy settings,
+  PDF reports, most menstrual-cycle writes, device/user settings writes
+  (`update_device_settings`, `update_user_settings`).

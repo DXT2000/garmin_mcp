@@ -68,3 +68,34 @@ Upstream still documents absolute cycling watts as target id 6 / `power.between`
 The fork refuses that form (`_POWER_BETWEEN_ERROR` in `workouts.py`). A sync that
 conflicts on `KNOWN_TARGET_TYPE_IDS`, the `upload_workout` docstring or
 `workout_templates.py` target types must keep the fork's version.
+
+The same applies to strength workouts: the fork defaults `create_strength_workout`'s
+`resolve_exercises` to true and uploads no_match exercises as free text. Upstream #238,
+if merged as written, defaults to false and blocks on any unresolved exercise.
+
+## Upstream PRs copied unmerged, and what was left
+
+Reviewed 2026-10-26 against upstream's 40 open PRs. Copied into the fork with
+their authors: #478, #482, #483, #484, #485, #486, #487, #488, #471, #417, #455
+(fork PR #11) and #238 (strength exercise catalog). When upstream merges any of
+them, possibly in a revised form, the next sync conflicts in those files; prefer
+upstream's merged version unless it drops a fork decision recorded above.
+
+Left for later, each its own change:
+
+- **#476 `update_workout`** — edit a workout in place instead of delete +
+  re-upload (which changes its id and drops its calendar entries). Conflicts with
+  current main.
+- **#481 Garmin Personal API** — Garmin's official read-only API (opened
+  2026-10-21) as a second backend beside the SSO login. Large; evaluate before
+  copying.
+- **#251's `note` field** for strength steps (appended to the description). Its
+  time/distance end conditions are already in the fork.
+- **#444 `GARMIN_TZ`** — not copied: written against garminconnect 0.3.2. With
+  0.3.20's own profile-timezone handling its host-local conversion would shift
+  writes when the host zone differs from the Garmin profile zone.
+
+Upstream comments worth posting (not posted; each needs the user's go-ahead):
+#194 (same fix as fork #5, verified independently), #345 and #344 (the fork's
+measured garminconnect 0.3.20 and mcp 2.x results), #422 (likely fixed by
+garminconnect 0.3.20).

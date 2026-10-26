@@ -84,7 +84,7 @@ def _pace_per_100m(mps: Optional[float]) -> Optional[str]:
 def _css_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
     """CSS as Garmin stores it, in millimetres per second, plus the pace.
 
-    758 is what Garmin Connect shows as 2:12 /100 m.
+    E.g. 800 = 0.8 m/s = 2:05 /100 m.
     """
     value = raw.get("criticalSwimSpeed", raw.get("value"))
     stamp = raw.get("measurementTimestampLocal") or raw.get("from") or ""

@@ -1718,16 +1718,16 @@ async def test_training_readiness_empty_dictionary_remains_no_data(
 @pytest.mark.asyncio
 async def test_get_health_recordings_ecg_summary_without_waveform(app_with_health_wellness, mock_garmin_client):
     mock_garmin_client.get_ecg_list.return_value = {"content": [{
-        "detailId": "e98d", "startTimeLocal": "2026-05-20T11:48:20.0",
-        "rhythmClassification": "SINUS_NORMAL", "heartRateAverage": 64.0, "rmssdHrv": 52,
-        "symptoms": [], "deviceInfo": {"productName": "FR970"}, "udi": "(01)x",
+        "detailId": "ecg-1", "startTimeLocal": "2026-01-15T09:00:00.0",
+        "rhythmClassification": "SINUS_NORMAL", "heartRateAverage": 60.0, "rmssdHrv": 40,
+        "symptoms": [], "deviceInfo": {"productName": "Watch X"}, "udi": "(01)x",
     }]}
     payload = json.loads((await app_with_health_wellness.call_tool("get_health_recordings", {
         "kind": "ecg", "start_date": "2026-01-01", "end_date": "2026-10-26",
     }))[0][0].text)
     assert payload["recordings"] == [{
-        "ecg_id": "e98d", "start_time_local": "2026-05-20T11:48:20.0", "rhythm": "SINUS_NORMAL",
-        "avg_heart_rate": 64.0, "rmssd_hrv_ms": 52, "device": "FR970",
+        "ecg_id": "ecg-1", "start_time_local": "2026-01-15T09:00:00.0", "rhythm": "SINUS_NORMAL",
+        "avg_heart_rate": 60.0, "rmssd_hrv_ms": 40, "device": "Watch X",
     }]
     mock_garmin_client.get_ecg_list.assert_called_once_with(start="2026-01-01", end="2026-10-26", page_size=50)
 

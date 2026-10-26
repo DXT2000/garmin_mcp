@@ -244,7 +244,7 @@ def register_tools(app):
             goal_time_seconds: Optional goal time in seconds (e.g. 16200 = 4:30:00)
             start_time_local: Optional start time "HH:MM"; needs time_zone
             time_zone: IANA zone for start_time_local, e.g. "Europe/Amsterdam"
-            location: Optional place, e.g. "Hoorn, NL"
+            location: Optional place, e.g. "Rotterdam, NL"
             primary: Make this the primary (focus) race. Whether Garmin then
                 clears the primary flag of the current primary race is unverified;
                 check get_calendar_events afterwards.

@@ -515,8 +515,8 @@ def register_tools(app):
 
         Args:
             gear_type: Uppercase key, e.g. "SHOES" or "BIKE" (see get_gear_types)
-            brand: Brand, e.g. "ASICS" (search_gear_models gives Garmin's spelling)
-            model: Model, e.g. "Novablast 6"
+            brand: Brand, e.g. "Saucony" (search_gear_models gives Garmin's spelling)
+            model: Model, e.g. "Ride 18"
             name: Nickname shown in Garmin Connect
             first_use_date: First use, YYYY-MM-DD
             max_usage_distance_km: Optional retirement threshold in km (e.g. 800 for shoes)

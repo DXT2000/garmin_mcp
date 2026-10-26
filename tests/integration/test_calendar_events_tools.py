@@ -474,13 +474,13 @@ async def test_get_calendar_events_takes_id_and_location_from_detail_when_feed_l
 ):
     """Subscribed races arrive with id null; private ones without location."""
     mock_garmin_client.get_scheduled_workouts.return_value = _month(_race("2027-06-20", id=None))
-    mock_garmin_client.connectapi.return_value = {"id": 29001068, "location": "Hoorn, NL"}
+    mock_garmin_client.connectapi.return_value = {"id": 1234567, "location": "Rotterdam, NL"}
     result = await app_with_calendar_events.call_tool(
         "get_calendar_events", {"start_date": "2027-06-01", "end_date": "2027-06-30"}
     )
     event = json.loads(_result_text(result))["events"][0]
-    assert event["event_id"] == 29001068
-    assert event["location"] == "Hoorn, NL"
+    assert event["event_id"] == 1234567
+    assert event["location"] == "Rotterdam, NL"
 
 
 # --- create / update / delete calendar events -------------------------------

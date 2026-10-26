@@ -1,6 +1,6 @@
 """Built-in tool profiles for GARMIN_TOOL_PROFILE.
 
-The server registers 180 tools. A profile narrows that to one area so an LLM
+The server registers 187 tools. A profile narrows that to one area so an LLM
 client carries less context, without the user having to list tool names in
 GARMIN_ENABLED_TOOLS. Each profile is a set of registered tool names; a unit
 test checks every name here against the tools the modules actually register,
@@ -214,6 +214,13 @@ TRAINING_TOOLS = CORE_TOOLS | frozenset(
         "get_training_load_trend",
         "get_training_status",
         "get_vo2max_trend",
+        "get_activity_power_curve",
+        "get_fastest_splits",
+        "get_one_rep_max",
+        "get_performance_metric",
+        "get_power_zones",
+        "get_training_load_activities",
+        "set_power_zones",
         "request_reload",
         # challenges: records, predictions, goals, badges
         "get_adhoc_challenges",

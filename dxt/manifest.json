@@ -228,6 +228,10 @@
       "description": "Get heart rate data in different time zones for an activity"
     },
     {
+      "name": "get_activity_power_curve",
+      "description": "Get one activity's best average power per duration (1 s up to 5 h)"
+    },
+    {
       "name": "get_activity_power_in_timezones",
       "description": "Get power distribution across training zones for an activity."
     },
@@ -356,6 +360,10 @@
       "description": "Estimate a composition-derived TDEE from logged intake, Garmin's"
     },
     {
+      "name": "get_fastest_splits",
+      "description": "Get your fastest times per distance (1 km, 5 km, ...) in a date range"
+    },
+    {
       "name": "get_fitnessage_data",
       "description": "Get fitness age data"
     },
@@ -464,12 +472,24 @@
       "description": "Get per-day nutrition totals for every day in a date range."
     },
     {
+      "name": "get_one_rep_max",
+      "description": "Get Garmin's estimated one-rep-max (1RM) values for strength exercises"
+    },
+    {
+      "name": "get_performance_metric",
+      "description": "Get one of Garmin's performance metrics, latest or as a history"
+    },
+    {
       "name": "get_personal_record",
       "description": "Get personal records for user"
     },
     {
       "name": "get_power_duration_curve",
       "description": "Get season-best Power Duration Curve across recent activities."
+    },
+    {
+      "name": "get_power_zones",
+      "description": "Get your power zones: FTP and the watt range of each zone, per sport"
     },
     {
       "name": "get_pregnancy_summary",
@@ -562,6 +582,10 @@
     {
       "name": "get_training_effect",
       "description": "Get training effect data for a specific activity."
+    },
+    {
+      "name": "get_training_load_activities",
+      "description": "Get each activity's training load and training-effect label in a date range"
     },
     {
       "name": "get_training_load_balance",
@@ -742,6 +766,10 @@
     {
       "name": "set_perceived_effort",
       "description": "Set the perceived effort (RPE) for an activity."
+    },
+    {
+      "name": "set_power_zones",
+      "description": "Set the FTP of a sport's power zones; the zone floors scale with it"
     },
     {
       "name": "unschedule_workout",

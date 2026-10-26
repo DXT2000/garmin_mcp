@@ -19,6 +19,7 @@ ADDITIVE_TOOLS = frozenset(
         "add_hydration_data",
         "add_weigh_in",
         "add_weigh_in_with_timestamps",
+        "copy_workout",
         "create_custom_food",
         "create_gear",
         "create_manual_activity",
@@ -34,6 +35,7 @@ ADDITIVE_TOOLS = frozenset(
         "schedule_week",
         "schedule_workout",
         "schedule_workouts",
+        "send_scheduled_workouts_to_devices",
         "set_blood_pressure",
         "set_fit_download_dir",
         "set_gear_status",
@@ -76,6 +78,7 @@ DESTRUCTIVE_TOOLS = frozenset(
         "unschedule_workouts",
         "update_custom_food",
         "update_gear",
+        "update_workout",
     }
 )
 
@@ -90,6 +93,7 @@ IDEMPOTENT_TOOLS = frozenset(
         "schedule_workout",
         "set_gear_status",
         "update_gear",
+        "update_workout",
     }
 )
 
@@ -214,6 +218,7 @@ READ_ONLY_TOOLS = frozenset(
         "get_weekly_stress",
         "get_weigh_ins",
         "get_workout_by_id",
+        "get_workout_types",
         "get_workouts",
         "list_gear",
         "list_strength_exercises",

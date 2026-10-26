@@ -32,7 +32,7 @@ This MCP server registers **150+ tools** across 17 functional modules on top of 
 - ✅ Activity Management (23 tools) - includes write tools for type, description, event type, perceived effort, feel, and exercise sets
 - ✅ Health & Wellness (33 tools) - includes custom lightweight summary tools
 - ✅ Training & Performance (18 tools) - includes CTL/ATL/TSB, HRV, VO2 max, and respiration trends
-- ✅ Workouts (15 tools) - includes rescheduling workouts
+- ✅ Workouts (19 tools) - includes rescheduling, editing in place (`update_workout`) and copying workouts
 - ✅ Devices (7 tools) - includes sending a workout to a device
 - ✅ Gear Management (12 tools) - list, add, edit, retire and delete gear; usage against a retirement threshold; activities per gear
 - ✅ Weight Tracking (5 tools)
@@ -131,7 +131,7 @@ If you need any of these endpoints, please [open an issue](https://github.com/Ta
 
 ## Tool Filtering
 
-This server registers 169 tools by default, which is a lot of context for an
+This server registers 173 tools by default, which is a lot of context for an
 LLM to carry in every session. You can expose only the tools you need with
 three optional environment variables:
 
@@ -153,7 +153,7 @@ stops the server at startup with the list of known profiles.
 | `minimal` | 20 | Recent activities with splits, daily stats, sleep, HRV, stress, body battery, training readiness and status |
 | `health` | 53 | Every health_wellness tool plus weight, body composition, blood pressure, hydration, women's health, fitness age, HRV and respiration trends |
 | `activities` | 50 | Activity list, detail, splits and edits; FIT analysis and power curve; gear; courses |
-| `workouts` | 29 | Workout library, upload, schedule and delete; the high-level builders; the exercise catalog; the calendar |
+| `workouts` | 33 | Workout library, upload, schedule and delete; the high-level builders; the exercise catalog; the calendar |
 | `training` | 38 | Training status, load, effect, VO2max, FTP, lactate threshold, endurance and hill scores, readiness, recovery time, personal records, race predictions, goals, badges |
 | `nutrition` | 23 | Food log, custom foods, daily nutrition settings, hydration, energy balance |
 

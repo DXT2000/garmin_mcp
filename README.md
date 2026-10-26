@@ -34,7 +34,7 @@ This MCP server registers **150+ tools** across 17 functional modules on top of 
 - ✅ Training & Performance (18 tools) - includes CTL/ATL/TSB, HRV, VO2 max, and respiration trends
 - ✅ Workouts (15 tools) - includes rescheduling workouts
 - ✅ Devices (7 tools) - includes sending a workout to a device
-- ✅ Gear Management (3 tools)
+- ✅ Gear Management (12 tools) - list, add, edit, retire and delete gear; usage against a retirement threshold; activities per gear
 - ✅ Weight Tracking (5 tools)
 - ✅ Challenges & Badges (9 tools)
 - ✅ Nutrition (15 tools) - food logs, meals, custom foods, food logging, and multi-day intake summaries
@@ -57,6 +57,15 @@ The tool list is generated from these registrations by `scripts/generate_dxt_too
 Each item in the `gear` array returned by `get_gear` includes a `notes` field
 containing the free-text Notes value shown in Garmin Connect. Gear without a
 Notes value returns `null`; all existing gear fields remain unchanged.
+
+`list_gear`, `get_gear_details`, `get_gear_activities`, `create_gear`,
+`update_gear`, `set_gear_status` and `delete_gear` use Garmin's current (v2)
+gear service. They accept a gear UUID with or without dashes, so the undashed
+UUIDs from `get_gear` work too. `list_gear` reports distance and time used and,
+when a retirement threshold is set, `distance_used_pct` / `duration_used_pct`.
+`update_gear`'s `default_for_activity_types` replaces the whole list.
+`delete_gear` previews first and only deletes with `confirm=true`;
+`set_gear_status` retires gear reversibly.
 
 ### Activity File Downloads
 
@@ -122,7 +131,7 @@ If you need any of these endpoints, please [open an issue](https://github.com/Ta
 
 ## Tool Filtering
 
-This server registers 160 tools by default, which is a lot of context for an
+This server registers 169 tools by default, which is a lot of context for an
 LLM to carry in every session. You can expose only the tools you need with
 three optional environment variables:
 
@@ -143,7 +152,7 @@ stops the server at startup with the list of known profiles.
 |---|---:|---|
 | `minimal` | 20 | Recent activities with splits, daily stats, sleep, HRV, stress, body battery, training readiness and status |
 | `health` | 53 | Every health_wellness tool plus weight, body composition, blood pressure, hydration, women's health, fitness age, HRV and respiration trends |
-| `activities` | 41 | Activity list, detail, splits and edits; FIT analysis and power curve; gear; courses |
+| `activities` | 50 | Activity list, detail, splits and edits; FIT analysis and power curve; gear; courses |
 | `workouts` | 29 | Workout library, upload, schedule and delete; the high-level builders; the exercise catalog; the calendar |
 | `training` | 38 | Training status, load, effect, VO2max, FTP, lactate threshold, endurance and hill scores, readiness, recovery time, personal records, race predictions, goals, badges |
 | `nutrition` | 23 | Food log, custom foods, daily nutrition settings, hydration, energy balance |

@@ -20,6 +20,7 @@ ADDITIVE_TOOLS = frozenset(
         "add_weigh_in",
         "add_weigh_in_with_timestamps",
         "create_custom_food",
+        "create_gear",
         "create_manual_activity",
         "create_run_interval_workout",
         "create_run_workout",
@@ -35,6 +36,7 @@ ADDITIVE_TOOLS = frozenset(
         "schedule_workouts",
         "set_blood_pressure",
         "set_fit_download_dir",
+        "set_gear_status",
         "upload_course",
         "upload_workout",
         "upload_workouts",
@@ -52,6 +54,7 @@ DESTRUCTIVE_TOOLS = frozenset(
         "delete_course",
         "delete_custom_food",
         "delete_food_log",
+        "delete_gear",
         "delete_weigh_ins",
         "delete_workout",
         "delete_workouts",
@@ -72,6 +75,7 @@ DESTRUCTIVE_TOOLS = frozenset(
         "unschedule_workout",
         "unschedule_workouts",
         "update_custom_food",
+        "update_gear",
     }
 )
 
@@ -80,7 +84,13 @@ DESTRUCTIVE_TOOLS = frozenset(
 # arguments. Batch scheduling can also upload an inline workout, so it is
 # intentionally excluded even though its existing-workout path is guarded.
 IDEMPOTENT_TOOLS = frozenset(
-    {"reschedule_workout", "schedule_week", "schedule_workout"}
+    {
+        "reschedule_workout",
+        "schedule_week",
+        "schedule_workout",
+        "set_gear_status",
+        "update_gear",
+    }
 )
 
 
@@ -142,6 +152,9 @@ READ_ONLY_TOOLS = frozenset(
         "get_full_name",
         "get_garmin_coach_workouts",
         "get_gear",
+        "get_gear_activities",
+        "get_gear_details",
+        "get_gear_types",
         "get_goals",
         "get_heart_rate_zones",
         "get_heart_rates",
@@ -202,10 +215,12 @@ READ_ONLY_TOOLS = frozenset(
         "get_weigh_ins",
         "get_workout_by_id",
         "get_workouts",
+        "list_gear",
         "list_strength_exercises",
         "match_strength_exercise",
         "resolve_strength_exercises",
         "search_foods",
+        "search_gear_models",
     }
 )
 

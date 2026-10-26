@@ -183,6 +183,16 @@ async def test_create_gear_passes_defaults_as_activity_type_keys(app_with_gear, 
 
 
 @pytest.mark.asyncio
+async def test_create_gear_sends_empty_notes_as_none(app_with_gear, mock_garmin_client):
+    mock_garmin_client.create_gear.return_value = GEAR_V2
+    await app_with_gear.call_tool("create_gear", {
+        "gear_type": "SHOES", "brand": "B", "model": "M", "name": "N",
+        "first_use_date": "2026-03-01", "notes": "",
+    })
+    assert mock_garmin_client.create_gear.call_args.kwargs["notes"] is None
+
+
+@pytest.mark.asyncio
 async def test_create_gear_exception(app_with_gear, mock_garmin_client):
     mock_garmin_client.create_gear.side_effect = Exception("API Error")
     result = await app_with_gear.call_tool("create_gear", {
@@ -197,12 +207,30 @@ async def test_update_gear_forwards_only_given_fields_including_clearing_values(
 ):
     mock_garmin_client.update_gear.return_value = GEAR_V2
     await app_with_gear.call_tool("update_gear", {
-        "gear_uuid": UNDASHED, "notes": "", "max_usage_distance_km": 0,
+        "gear_uuid": UNDASHED, "max_usage_distance_km": 0,
         "default_for_activity_types": [],
     })
     mock_garmin_client.update_gear.assert_called_once_with(
-        DASHED, notes="", max_usage_distance_km=0, activity_type_keys=[]
+        DASHED, max_usage_distance_km=0, activity_type_keys=[]
     )
+    mock_garmin_client.client.put.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_gear_clears_notes_with_null_not_empty_string(
+    app_with_gear, mock_garmin_client
+):
+    mock_garmin_client.update_gear.return_value = GEAR_V2
+    mock_garmin_client.get_gear_details.return_value = {**GEAR_V2, "notes": "old note"}
+    payload = json.loads(_text(await app_with_gear.call_tool("update_gear", {
+        "gear_uuid": DASHED, "name": "Renamed", "notes": "",
+    })))
+    assert payload["status"] == "success"
+    mock_garmin_client.update_gear.assert_called_once_with(DASHED, name="Renamed")
+    path = mock_garmin_client.client.put.call_args.args[1]
+    body = mock_garmin_client.client.put.call_args.kwargs["json"]
+    assert path == f"/gear-service/gear/v2/{DASHED}"
+    assert body["notes"] is None and body["brand"] == "Brand"
 
 
 @pytest.mark.asyncio

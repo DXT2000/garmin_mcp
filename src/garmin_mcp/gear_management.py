@@ -508,7 +508,7 @@ def register_tools(app):
         max_usage_distance_km: Optional[float] = None,
         max_usage_duration_min: Optional[float] = None,
         usage_type: str = "DISTANCE",
-        notes: str = "",
+        notes: Optional[str] = None,
         default_for_activity_types: Optional[List[str]] = None,
     ) -> str:
         """Add a piece of gear (shoes, bike, ...) to Garmin Connect
@@ -536,7 +536,9 @@ def register_tools(app):
                 usage_type=usage_type,
                 max_usage_distance_km=max_usage_distance_km,
                 max_usage_duration_min=max_usage_duration_min,
-                notes=notes,
+                # Garmin answers 400 for an empty notes string (1-2000
+                # characters) but accepts null, so no note is sent as None.
+                notes=notes or None,
                 activity_type_keys=default_for_activity_types,
             )
             result: Dict[str, Any] = {"status": "success", "message": "Gear created"}
@@ -590,8 +592,25 @@ def register_tools(app):
         changes = {k: v for k, v in fields.items() if v is not None}
         if not changes:
             return "Error updating gear: pass at least one field to change."
+        # Garmin answers 400 for an empty notes string but clears the note on
+        # null, and garmin_client.update_gear treats None as "unchanged", so a
+        # clear is a separate PUT of the full gear object with notes null.
+        clear_notes = changes.get("notes") == ""
+        if clear_notes:
+            del changes["notes"]
         try:
-            updated = garmin_client.update_gear(_dashed_gear_uuid(gear_uuid), **changes)
+            uuid = _dashed_gear_uuid(gear_uuid)
+            updated = garmin_client.update_gear(uuid, **changes) if changes else None
+            if clear_notes:
+                current = garmin_client.get_gear_details(uuid)
+                if not isinstance(current, dict) or not current:
+                    return f"Error updating gear: gear {gear_uuid} not found."
+                garmin_client.client.put(
+                    "connectapi",
+                    f"/gear-service/gear/v2/{uuid}",
+                    json={**current, "notes": None},
+                )
+                updated = garmin_client.get_gear_details(uuid)
             result: Dict[str, Any] = {"status": "success", "message": "Gear updated"}
             if isinstance(updated, dict):
                 result["gear"] = _curate_gear_v2(updated)

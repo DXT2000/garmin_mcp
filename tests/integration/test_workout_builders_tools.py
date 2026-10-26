@@ -611,3 +611,54 @@ async def test_create_strength_resolve_false_uploads_free_text_without_catalog(
     resolve.assert_not_called()
     step = mock_garmin_client.upload_workout.call_args.args[0]["workoutSegments"][0]["workoutSteps"][0]
     assert step["exerciseName"] == "Custom"
+
+
+@pytest.fixture
+def sample_exercise_catalog(monkeypatch):
+    """The real resolver over the small fixture catalog, instead of a mocked result."""
+    from pathlib import Path
+
+    fixtures = Path(__file__).resolve().parent.parent / "fixtures"
+    catalog = exercise_catalog.ExerciseCatalog(exercise_catalog.parse_exercises(
+        json.loads((fixtures / "exercises_catalog_sample.json").read_text()),
+        exercise_catalog.parse_properties(
+            (fixtures / "exercise_types_sample.properties").read_text()
+        ),
+    ))
+    monkeypatch.setattr(exercise_catalog, "load_catalog", lambda: catalog)
+
+
+@pytest.mark.asyncio
+async def test_create_strength_uploads_no_match_as_free_text_and_keeps_others_linked(
+    app_with_builders, mock_garmin_client, sample_exercise_catalog
+):
+    mock_garmin_client.upload_workout.return_value = {"workoutId": 45, "workoutName": "Core"}
+    result = await app_with_builders.call_tool("create_strength_workout", {
+        "name": "Core", "exercises": [
+            {"name": "Reverse crunch", "sets": 1, "reps": 12},
+            {"name": "Pallof press", "sets": 1, "reps": 10},
+        ],
+    })
+    payload = json.loads(result[0][0].text)
+    assert payload["status"] == "success"
+    assert "Pallof press" in payload["warning"]
+    steps = mock_garmin_client.upload_workout.call_args.args[0]["workoutSegments"][0]["workoutSteps"]
+    linked, free_text = steps[0], steps[2]
+    assert (linked["category"], linked["exerciseName"]) == ("CRUNCH", "REVERSE_CRUNCH")
+    assert free_text["exerciseName"] == "Pallof press" and "category" not in free_text
+
+
+@pytest.mark.asyncio
+async def test_create_strength_ambiguous_still_blocks_alongside_no_match(
+    app_with_builders, mock_garmin_client, sample_exercise_catalog
+):
+    result = await app_with_builders.call_tool("create_strength_workout", {
+        "name": "Core", "exercises": [
+            {"name": "Leg raise", "sets": 1, "reps": 12},
+            {"name": "Pallof press", "sets": 1, "reps": 10},
+        ],
+    })
+    payload = json.loads(result[0][0].text)
+    assert payload["status"] == "needs_review"
+    assert [item["status"] for item in payload["unresolved_items"]] == ["ambiguous", "no_match"]
+    mock_garmin_client.upload_workout.assert_not_called()

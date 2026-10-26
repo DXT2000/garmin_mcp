@@ -849,13 +849,15 @@ def register_tools(app):
                 400 Invalid category. Full list:
                 https://connect.garmin.com/web-data/exercises/Exercises.json
             resolve_exercises: Resolve the whole batch against Garmin's public
-                catalog before upload (default true). If any exercise is not a
-                confident match, nothing is uploaded and the response has
-                status "needs_review" with alternatives: retry with the chosen
-                category and exercise_name, or pass false to upload the names
-                as free text, which Garmin keeps only in the step description.
-                If the catalog cannot be loaded, the upload goes ahead as free
-                text with a "warning".
+                catalog before upload (default true). If any exercise is
+                ambiguous or a near miss, nothing is uploaded and the response
+                has status "needs_review" with alternatives: retry with the
+                chosen category and exercise_name. An exercise with no close
+                catalog entry at all is uploaded as free text (Garmin keeps the
+                name only in the step description) and named in "warning";
+                the others stay linked. Pass false to upload every name as free
+                text. If the catalog cannot be loaded, the upload goes ahead as
+                free text with a "warning".
         """
         try:
             catalog_warning = None
@@ -869,10 +871,33 @@ def register_tools(app):
                         "Garmin exercise catalog unavailable; uploaded using legacy "
                         "exercise inputs without catalog validation."
                     )
-                elif resolution["status"] != "ready":
-                    return json.dumps(resolution, indent=2, ensure_ascii=False)
-                else:
+                elif resolution["status"] == "ready":
                     upload_exercises = resolution["resolved_exercises"]
+                elif resolution["status"] == "needs_review" and all(
+                    item["status"] == "no_match"
+                    for item in resolution["unresolved_items"]
+                ):
+                    # no_match means nothing in the catalog came close, so there
+                    # is no choice to hand back: that exercise goes up as free
+                    # text and the rest stay linked. Anything with alternatives
+                    # (ambiguous, a typo, an invalid pair) still blocks.
+                    by_index = {item["index"]: item for item in resolution["items"]}
+                    upload_exercises = [
+                        by_index[index].get("resolved_exercise", exercise)
+                        for index, exercise in enumerate(exercises)
+                    ]
+                    unlinked_exercises = [
+                        exercises[item["index"]].get("name")
+                        or exercises[item["index"]].get("exercise_name")
+                        for item in resolution["unresolved_items"]
+                    ]
+                    catalog_warning = (
+                        "Not in Garmin's exercise catalog, uploaded as free text "
+                        "(no exercise link on the watch): "
+                        + ", ".join(str(n) for n in unlinked_exercises)
+                    )
+                else:
+                    return json.dumps(resolution, indent=2, ensure_ascii=False)
             workout_json = build_strength_json(name=name, exercises=upload_exercises)
             result = garmin_client.upload_workout(workout_json)
 

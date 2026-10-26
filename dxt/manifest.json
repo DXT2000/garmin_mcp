@@ -228,6 +228,10 @@
       "description": "Get heart rate data in different time zones for an activity"
     },
     {
+      "name": "get_activity_personal_records",
+      "description": "Get the personal records (PRs) one activity set"
+    },
+    {
       "name": "get_activity_power_curve",
       "description": "Get one activity's best average power per duration (1 s up to 5 h)"
     },
@@ -242,6 +246,10 @@
     {
       "name": "get_activity_splits",
       "description": "Get splits for an activity"
+    },
+    {
+      "name": "get_activity_swim_lengths",
+      "description": "Get a pool swim length by length: time, pace /100 m, strokes,"
     },
     {
       "name": "get_activity_typed_splits",
@@ -540,6 +548,10 @@
       "description": "Get scheduled workouts between two dates with curated summary list"
     },
     {
+      "name": "get_sensors",
+      "description": "Get paired external sensors (heart-rate straps, power meters, ...)"
+    },
+    {
       "name": "get_sleep_data",
       "description": "Get full sleep data with all details"
     },
@@ -708,6 +720,10 @@
       "description": "Schedule multiple workouts to specific calendar dates"
     },
     {
+      "name": "search_activities",
+      "description": "Search activities like the Garmin Connect activity list: free text"
+    },
+    {
       "name": "search_foods",
       "description": "Search Garmin's general food catalog (FatSecret + Garmin custom foods)"
     },
@@ -798,6 +814,10 @@
     {
       "name": "update_workout",
       "description": "Replace an existing workout in place, keeping its id and calendar entries"
+    },
+    {
+      "name": "upload_activity_file",
+      "description": "Upload a FIT, GPX or TCX file from this computer as a new activity"
     },
     {
       "name": "upload_course",

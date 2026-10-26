@@ -3448,3 +3448,121 @@ async def test_get_scheduled_workouts_handles_null_graphql_data(app_with_workout
     text = result[0][0].text
     assert "NoneType" not in text
     assert "No workouts scheduled" in text
+
+
+def _simple_run(name="Easy run"):
+    return {
+        "workoutName": name,
+        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+        "workoutSegments": [{
+            "segmentOrder": 1,
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+            "workoutSteps": [{
+                "type": "ExecutableStepDTO",
+                "stepOrder": 1,
+                "stepType": {"stepTypeId": 3, "stepTypeKey": "interval"},
+                "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
+                "endConditionValue": 1800.0,
+                "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"},
+            }],
+        }],
+    }
+
+
+@pytest.mark.asyncio
+async def test_update_workout_replaces_in_place(app_with_workouts, mock_garmin_client):
+    mock_garmin_client.update_workout.return_value = None
+    result = await app_with_workouts.call_tool(
+        "update_workout", {"workout_id": 123, "workout_data": _simple_run("Renamed")}
+    )
+    payload = json.loads(result[0][0].text)
+    assert payload["status"] == "success" and payload["workout_id"] == 123
+    args = mock_garmin_client.update_workout.call_args.args
+    assert args[0] == 123 and args[1]["workoutName"] == "Renamed"
+
+
+@pytest.mark.asyncio
+async def test_update_workout_refuses_power_between_like_upload(app_with_workouts, mock_garmin_client):
+    workout_data = _cycling_workout_with_steps(
+        [{
+            "type": "ExecutableStepDTO",
+            "stepOrder": 1,
+            "stepType": {"stepTypeId": 3, "stepTypeKey": "interval"},
+            "endCondition": {"conditionTypeId": 2, "conditionTypeKey": "time"},
+            "endConditionValue": 600.0,
+            "targetType": {"workoutTargetTypeId": 6, "workoutTargetTypeKey": "power.between"},
+            "targetValueOne": 200,
+            "targetValueTwo": 250,
+        }],
+        name="Cycling Power Between Test",
+    )
+    result = await app_with_workouts.call_tool(
+        "update_workout", {"workout_id": 123, "workout_data": workout_data}
+    )
+    assert "'power.between' is not a Garmin target key" in result[0][0].text
+    mock_garmin_client.update_workout.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_workout_exception(app_with_workouts, mock_garmin_client):
+    mock_garmin_client.update_workout.side_effect = Exception("API Error")
+    result = await app_with_workouts.call_tool(
+        "update_workout", {"workout_id": 123, "workout_data": _simple_run()}
+    )
+    assert "Error updating workout" in result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_copy_workout_returns_new_id(app_with_workouts, mock_garmin_client):
+    mock_garmin_client.copy_workout.return_value = {"workoutId": 456, "workoutName": "Copy"}
+    result = await app_with_workouts.call_tool(
+        "copy_workout", {"workout_id": 123, "new_name": "Copy"}
+    )
+    assert json.loads(result[0][0].text) == {
+        "status": "success", "source_workout_id": 123, "workout_id": 456, "name": "Copy",
+    }
+    mock_garmin_client.copy_workout.assert_called_once_with(123, "Copy")
+
+
+@pytest.mark.asyncio
+async def test_copy_workout_exception(app_with_workouts, mock_garmin_client):
+    mock_garmin_client.copy_workout.side_effect = Exception("API Error")
+    result = await app_with_workouts.call_tool("copy_workout", {"workout_id": 1, "new_name": "X"})
+    assert "Error copying workout" in result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_send_scheduled_workouts_to_devices(app_with_workouts, mock_garmin_client):
+    result = await app_with_workouts.call_tool("send_scheduled_workouts_to_devices", {})
+    assert json.loads(result[0][0].text)["status"] == "success"
+    mock_garmin_client.send_scheduled_workouts_to_devices.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_send_scheduled_workouts_to_devices_exception(app_with_workouts, mock_garmin_client):
+    mock_garmin_client.send_scheduled_workouts_to_devices.side_effect = Exception("API Error")
+    result = await app_with_workouts.call_tool("send_scheduled_workouts_to_devices", {})
+    assert "Error sending scheduled workouts" in result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_get_workout_types_maps_ids_to_keys(app_with_workouts, mock_garmin_client):
+    mock_garmin_client.get_workout_types.return_value = {
+        "workoutEquipmentTypes": [
+            {"equipmentTypeId": 1, "equipmentTypeKey": "fins", "displayOrder": 1},
+            {"equipmentTypeId": 4, "equipmentTypeKey": "pull_buoy", "displayOrder": 4},
+        ],
+        "workoutStepTypes": [{"stepTypeId": 1, "stepTypeKey": "warmup", "displayOrder": 1}],
+    }
+    result = await app_with_workouts.call_tool("get_workout_types", {})
+    assert json.loads(result[0][0].text) == {
+        "step_types": {"1": "warmup"},
+        "equipment_types": {"1": "fins", "4": "pull_buoy"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_workout_types_exception(app_with_workouts, mock_garmin_client):
+    mock_garmin_client.get_workout_types.side_effect = Exception("API Error")
+    result = await app_with_workouts.call_tool("get_workout_types", {})
+    assert "Error retrieving workout types" in result[0][0].text

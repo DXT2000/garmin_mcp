@@ -1180,6 +1180,112 @@ def register_tools(app):
         }, indent=2)
 
     @app.tool()
+    async def update_workout(workout_id: int, workout_data: dict) -> str:
+        """Replace an existing workout in place, keeping its id and calendar entries
+
+        Unlike delete_workout + upload_workout, the workout keeps its id, so
+        every scheduled instance stays on the calendar with the new content.
+
+        workout_data is the COMPLETE workout, not a patch: fetch it with
+        get_workout_by_id(workout_id, raw=true), change what you need, and pass
+        the whole object back. Anything left out is removed from the workout.
+        It is checked with exactly the same rules as upload_workout (step DTO
+        types, end-condition and target-type id/key pairs, no "power.between";
+        see upload_workout for the format).
+
+        Args:
+            workout_id: ID of the workout to replace (from get_workouts)
+            workout_data: The complete workout structure, as for upload_workout
+
+        Safe to repeat with the same arguments.
+        """
+        try:
+            _normalize_workout_steps(workout_data)
+            _validate_end_condition_steps(workout_data)
+            _validate_target_type_steps(workout_data)
+            garmin_client.update_workout(workout_id, workout_data)
+            return json.dumps({
+                "status": "success",
+                "workout_id": workout_id,
+                "name": workout_data.get("workoutName"),
+                "message": "Workout replaced in place; its id and schedules are unchanged",
+            }, indent=2)
+        except Exception as e:
+            return f"Error updating workout: {str(e)}"
+
+    @app.tool()
+    async def copy_workout(workout_id: int, new_name: str) -> str:
+        """Duplicate a workout in the library under a new name
+
+        Use it to make a variant (e.g. next week's progression) without
+        changing the original; edit the copy with update_workout.
+
+        Args:
+            workout_id: ID of the workout to copy (from get_workouts)
+            new_name: Name for the copy
+        """
+        try:
+            result = garmin_client.copy_workout(workout_id, new_name)
+            curated = {"status": "success", "source_workout_id": workout_id}
+            if isinstance(result, dict):
+                curated["workout_id"] = result.get("workoutId")
+                curated["name"] = result.get("workoutName")
+            curated = {k: v for k, v in curated.items() if v is not None}
+            return json.dumps(curated, indent=2)
+        except Exception as e:
+            return f"Error copying workout: {str(e)}"
+
+    @app.tool()
+    async def send_scheduled_workouts_to_devices() -> str:
+        """Ask Garmin to send all scheduled workouts to your devices now
+
+        For one unscheduled workout use push_workout_to_device.
+        """
+        try:
+            garmin_client.send_scheduled_workouts_to_devices()
+            return json.dumps({
+                "status": "success",
+                "message": "Scheduled workouts sent to devices",
+            }, indent=2)
+        except Exception as e:
+            return f"Error sending scheduled workouts to devices: {str(e)}"
+
+    @app.tool()
+    async def get_workout_types() -> str:
+        """Get Garmin's workout id dictionaries: step, end condition, target, sport,
+        intensity, equipment, swim stroke, swim instruction and drill types
+
+        Each group maps id -> key, e.g. equipment_types {"1": "fins", ...}.
+        Use these ids in upload_workout / update_workout steps.
+        """
+        groups = {
+            "workoutStepTypes": ("step_types", "stepTypeId", "stepTypeKey"),
+            "workoutSportTypes": ("sport_types", "sportTypeId", "sportTypeKey"),
+            "workoutConditionTypes": ("end_condition_types", "conditionTypeId", "conditionTypeKey"),
+            "workoutIntensityTypes": ("intensity_types", "intensityTypeId", "intensityTypeKey"),
+            "workoutTargetTypes": ("target_types", "workoutTargetTypeId", "workoutTargetTypeKey"),
+            "workoutEquipmentTypes": ("equipment_types", "equipmentTypeId", "equipmentTypeKey"),
+            "workoutStrokeTypes": ("stroke_types", "strokeTypeId", "strokeTypeKey"),
+            "workoutSwimInstructionTypes": ("swim_instruction_types", "instructionTypeId", "instructionTypeKey"),
+            "workoutDrillTypes": ("drill_types", "drillTypeId", "drillTypeKey"),
+        }
+        try:
+            types = garmin_client.get_workout_types()
+            if not types:
+                return "No workout types found."
+            curated = {}
+            for source, (name, id_key, key_key) in groups.items():
+                entries = types.get(source)
+                if isinstance(entries, list):
+                    curated[name] = {
+                        str(e.get(id_key)): e.get(key_key)
+                        for e in entries if isinstance(e, dict)
+                    }
+            return json.dumps(curated, indent=2)
+        except Exception as e:
+            return f"Error retrieving workout types: {str(e)}"
+
+    @app.tool()
     async def delete_workout(workout_id: int, confirm: bool = False) -> str:
         """Delete a workout from Garmin Connect
 

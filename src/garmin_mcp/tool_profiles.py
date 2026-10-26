@@ -1,6 +1,6 @@
 """Built-in tool profiles for GARMIN_TOOL_PROFILE.
 
-The server registers 169 tools. A profile narrows that to one area so an LLM
+The server registers 173 tools. A profile narrows that to one area so an LLM
 client carries less context, without the user having to list tool names in
 GARMIN_ENABLED_TOOLS. Each profile is a set of registered tool names; a unit
 test checks every name here against the tools the modules actually register,
@@ -157,18 +157,22 @@ WORKOUTS_TOOLS = CORE_TOOLS | frozenset(
         "delete_workout",
         "delete_workouts",
         "download_workout",
+        "copy_workout",
         "get_garmin_coach_workouts",
         "get_scheduled_workouts",
         "get_training_plan_workouts",
         "get_workout_by_id",
+        "get_workout_types",
         "get_workouts",
         "list_strength_exercises",
         "match_strength_exercise",
         "resolve_strength_exercises",
         "schedule_workout",
         "schedule_workouts",
+        "send_scheduled_workouts_to_devices",
         "unschedule_workout",
         "unschedule_workouts",
+        "update_workout",
         "upload_workout",
         "upload_workouts",
         # workout_builders

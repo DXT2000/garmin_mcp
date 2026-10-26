@@ -88,6 +88,10 @@
       "description": "Add a new weight measurement with specific timestamps"
     },
     {
+      "name": "copy_workout",
+      "description": "Duplicate a workout in the library under a new name"
+    },
+    {
       "name": "count_activities",
       "description": "Get total count of activities in the user's Garmin account"
     },
@@ -600,6 +604,10 @@
       "description": "Get detailed information for a specific workout"
     },
     {
+      "name": "get_workout_types",
+      "description": "Get Garmin's workout id dictionaries: step, end condition, target, sport,"
+    },
+    {
       "name": "get_workouts",
       "description": "Get all workouts with curated summary list"
     },
@@ -664,6 +672,10 @@
       "description": "Search Garmin's brand/model catalogue (the \"Add gear\" autocomplete)"
     },
     {
+      "name": "send_scheduled_workouts_to_devices",
+      "description": "Ask Garmin to send all scheduled workouts to your devices now"
+    },
+    {
       "name": "set_activity_description",
       "description": "Set or update the free-text description (notes) of an activity."
     },
@@ -726,6 +738,10 @@
     {
       "name": "update_gear",
       "description": "Edit a piece of gear; only the fields you pass change"
+    },
+    {
+      "name": "update_workout",
+      "description": "Replace an existing workout in place, keeping its id and calendar entries"
     },
     {
       "name": "upload_course",

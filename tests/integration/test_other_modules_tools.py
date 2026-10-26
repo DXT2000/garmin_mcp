@@ -1250,14 +1250,14 @@ async def test_menstrual_calendar_deduplicates_cycles_crossing_chunk_seam(
 @pytest.mark.asyncio
 async def test_get_sensors_curates(app_with_devices, mock_garmin_client):
     mock_garmin_client.get_sensors.return_value = [{
-        "deviceName": "HRM 600", "sensorType": "HEART_RATE", "batteryStatus": "OK",
-        "batteryLevel": 42, "lastConnected": "2026-10-25T12:01:48.0", "manufacturer": "GARMIN",
+        "deviceName": "HRM X", "sensorType": "HEART_RATE", "batteryStatus": "OK",
+        "batteryLevel": 80, "lastConnected": "2026-01-01T08:00:00.0", "manufacturer": "GARMIN",
         "imageUrl": "https://example.invalid/x.png",
     }]
     payload = json.loads((await app_with_devices.call_tool("get_sensors", {}))[0][0].text)
     assert payload["sensors"][0] == {
-        "name": "HRM 600", "type": "HEART_RATE", "manufacturer": "GARMIN",
-        "battery_status": "OK", "battery_percent": 42, "last_connected": "2026-10-25T12:01:48.0",
+        "name": "HRM X", "type": "HEART_RATE", "manufacturer": "GARMIN",
+        "battery_status": "OK", "battery_percent": 80, "last_connected": "2026-01-01T08:00:00.0",
     }
 
 

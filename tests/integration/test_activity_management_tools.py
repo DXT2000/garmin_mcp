@@ -1490,9 +1490,9 @@ SWIM_DETAILS = {
         {"metricsIndex": 5, "key": "weightedMeanSwolf"},
     ],
     "activityDetailMetrics": [
-        {"metrics": [25.0, 42.75, 91.0, 14.0, 1.0, 57.0]},
-        {"metrics": [25.0, 35.0, 107.0, 13.0, 1.0, 48.0]},
-        {"metrics": [None, 20.066, 117.0, None, 0.0, None]},
+        {"metrics": [25.0, 40.0, 100.0, 15.0, 1.0, 55.0]},
+        {"metrics": [25.0, 36.0, 110.0, 14.0, 1.0, 50.0]},
+        {"metrics": [None, 20.0, 115.0, None, 0.0, None]},
     ],
 }
 
@@ -1507,10 +1507,10 @@ async def test_get_activity_swim_lengths_decodes_by_descriptor_key(
     ))[0][0].text)
     assert payload["lengths_count"] == 2 and payload["avg_swolf"] == 52.5
     assert payload["lengths"][0] == {
-        "length": 1, "distance_m": 25.0, "seconds": 42.8, "pace_per_100m": "2:51",
-        "strokes": 14.0, "swolf": 57.0, "avg_hr": 91.0,
+        "length": 1, "distance_m": 25.0, "seconds": 40.0, "pace_per_100m": "2:40",
+        "strokes": 15.0, "swolf": 55.0, "avg_hr": 100.0,
     }
-    assert payload["rests"] == [{"after_length": 2, "seconds": 20.1}]
+    assert payload["rests"] == [{"after_length": 2, "seconds": 20.0}]
 
 
 @pytest.mark.asyncio
@@ -1533,12 +1533,12 @@ async def test_search_activities_maps_filters_to_garmin_params(
 ):
     mock_garmin_client.search_activities.return_value = [{
         "activityId": 9, "activityName": "Tempo", "activityType": {"typeKey": "running"},
-        "startTimeLocal": "2026-10-07 19:40:35", "distance": 6594.96, "duration": 2400.0,
+        "startTimeLocal": "2026-01-10 08:00:00", "distance": 6500.0, "duration": 2400.0,
     }]
     payload = json.loads((await app_with_activity_management.call_tool("search_activities", {
         "text": "Tempo", "activity_type": "running", "min_distance_km": 5, "limit": 500,
     }))[0][0].text)
-    assert payload["activities"][0]["distance_km"] == 6.59
+    assert payload["activities"][0]["distance_km"] == 6.5
     mock_garmin_client.search_activities.assert_called_once_with(
         start=0, limit=100, search="Tempo", activityType="running", minDistance=5000
     )

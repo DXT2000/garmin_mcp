@@ -307,10 +307,14 @@ categories — anything else, including `OTHER` and `UNASSIGNED`, is rejected wi
     {"name": "Sentadillas", "sets": 3, "reps": 12, "rest_seconds": 90},
     {"name": "Flexiones",   "sets": 3, "reps": 15, "rest_seconds": 60},
     {"name": "Peso muerto", "sets": 3, "reps": 10, "rest_seconds": 90},
-    {"name": "Farmers Carry 40m", "sets": 3, "reps": 1, "rest_seconds": 90, "category": "CARRY"}
+    {"name": "Plank", "sets": 3, "duration_seconds": 45, "rest_seconds": 60},
+    {"name": "Farmers Carry", "sets": 3, "distance_meters": 40, "rest_seconds": 90, "category": "CARRY"}
   ]
 }
 ```
+
+Each exercise ends on `reps` (default 1), `duration_seconds` or `distance_meters`;
+giving more than one of them is refused.
 
 `resolve_exercises` defaults to `true`: the
 whole batch is checked before JSON construction. Every item must resolve before

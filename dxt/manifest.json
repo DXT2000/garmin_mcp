@@ -96,6 +96,10 @@
       "description": "Create a custom food in the user's Garmin nutrition library"
     },
     {
+      "name": "create_gear",
+      "description": "Add a piece of gear (shoes, bike, ...) to Garmin Connect"
+    },
+    {
       "name": "create_manual_activity",
       "description": "Log a manual activity in Garmin Connect \u2014 useful for activities done without a watch."
     },
@@ -134,6 +138,10 @@
     {
       "name": "delete_food_log",
       "description": "Delete a food log entry"
+    },
+    {
+      "name": "delete_gear",
+      "description": "Delete a piece of gear from Garmin Connect"
     },
     {
       "name": "delete_weigh_ins",
@@ -342,6 +350,18 @@
     {
       "name": "get_gear",
       "description": "Get all gear registered with the user account"
+    },
+    {
+      "name": "get_gear_activities",
+      "description": "List the activities a piece of gear was used in"
+    },
+    {
+      "name": "get_gear_details",
+      "description": "Get one piece of gear: usage totals, threshold, and use per activity type"
+    },
+    {
+      "name": "get_gear_types",
+      "description": "Get the gear types Garmin knows and the type keys you currently use"
     },
     {
       "name": "get_goals",
@@ -584,6 +604,10 @@
       "description": "Get all workouts with curated summary list"
     },
     {
+      "name": "list_gear",
+      "description": "List gear from Garmin's current (v2) gear service, with usage totals"
+    },
+    {
       "name": "list_strength_exercises",
       "description": "List Garmin strength exercises and their exact category/exerciseName identifiers. Supports category filtering, text search, and pagination. Use the returned category and exercise_name fields when creating a strength workout."
     },
@@ -636,6 +660,10 @@
       "description": "Search Garmin's general food catalog (FatSecret + Garmin custom foods)"
     },
     {
+      "name": "search_gear_models",
+      "description": "Search Garmin's brand/model catalogue (the \"Add gear\" autocomplete)"
+    },
+    {
       "name": "set_activity_description",
       "description": "Set or update the free-text description (notes) of an activity."
     },
@@ -668,6 +696,10 @@
       "description": "Set and persist the default directory for downloaded activity files."
     },
     {
+      "name": "set_gear_status",
+      "description": "Retire a piece of gear, or make a retired one active again"
+    },
+    {
       "name": "set_heart_rate_zones",
       "description": "Set an account-level heart-rate training-zone configuration for one sport."
     },
@@ -690,6 +722,10 @@
     {
       "name": "update_custom_food",
       "description": "Update an existing custom food in the user's Garmin nutrition library"
+    },
+    {
+      "name": "update_gear",
+      "description": "Edit a piece of gear; only the fields you pass change"
     },
     {
       "name": "upload_course",

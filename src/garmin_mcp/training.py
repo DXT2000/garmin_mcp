@@ -40,6 +40,99 @@ def _pace_per_km(mps: Optional[float]) -> Optional[str]:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
+_PERFORMANCE_METRICS = (
+    "critical_swim_speed",
+    "cycling_ability",
+    "running_economy",
+    "stamina_running",
+    "stamina_cycling",
+    "heat_altitude_acclimation",
+    "ftp_cycling",
+    "ftp_running",
+    "power_to_weight",
+)
+# Metrics Garmin only serves as a history; without dates they cover this many days.
+_RANGE_ONLY_METRICS = {"ftp_cycling", "ftp_running", "power_to_weight"}
+_RANGE_ONLY_DEFAULT_DAYS = 90
+_LATEST_ONLY_METRICS = {"stamina_running", "stamina_cycling"}
+_MAX_METRIC_RANGE_DAYS = 366
+# Garmin answers 400 for a daily cycling-ability range longer than 30 days.
+_CYCLING_ABILITY_CHUNK_DAYS = 30
+
+
+def _metric_dates(
+    start_date: Optional[str], end_date: Optional[str]
+) -> Tuple[datetime.date, datetime.date]:
+    start = datetime.date.fromisoformat(start_date) if start_date else None
+    end = datetime.date.fromisoformat(end_date) if end_date else datetime.date.today()
+    if start is None:
+        start = end - datetime.timedelta(days=_RANGE_ONLY_DEFAULT_DAYS)
+    if start > end:
+        raise ValueError("start_date must be on or before end_date")
+    if (end - start).days > _MAX_METRIC_RANGE_DAYS:
+        raise ValueError(f"date range must be at most {_MAX_METRIC_RANGE_DAYS} days")
+    return start, end
+
+
+def _pace_per_100m(mps: Optional[float]) -> Optional[str]:
+    if not mps:
+        return None
+    seconds = round(100 / mps)
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def _css_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """CSS as Garmin stores it, in millimetres per second, plus the pace.
+
+    758 is what Garmin Connect shows as 2:12 /100 m.
+    """
+    value = raw.get("criticalSwimSpeed", raw.get("value"))
+    stamp = raw.get("measurementTimestampLocal") or raw.get("from") or ""
+    return {
+        "date": stamp[:10] or None,
+        "raw_value": value,
+        "speed_m_per_s": round(value / 1000, 3) if isinstance(value, (int, float)) else None,
+        "pace_per_100m": _pace_per_100m(value / 1000) if isinstance(value, (int, float)) else None,
+        "source": raw.get("biometricSourceType"),
+    }
+
+
+def _cycling_ability_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
+    keys = (
+        ("date", "calendarDate"), ("aerobic_endurance", "aerobicEndurance"),
+        ("aerobic_capacity", "aerobicCapacity"), ("anaerobic_capacity", "anaerobicCapacity"),
+        ("profile_type", "profileType"),
+        ("aerobic_endurance_feedback", "aerobicEnduranceFeedback"),
+        ("aerobic_capacity_feedback", "aerobicCapacityFeedback"),
+        ("anaerobic_capacity_feedback", "anaerobicCapacityFeedback"),
+    )
+    return {out: raw.get(src) for out, src in keys if raw.get(src) is not None}
+
+
+def _acclimation_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
+    keys = (
+        ("date", "calendarDate"), ("heat_acclimation_percent", "heatAcclimationPercentage"),
+        ("heat_trend", "heatTrend"), ("altitude_acclimation", "altitudeAcclimation"),
+        ("altitude_trend", "altitudeTrend"), ("current_altitude_meters", "currentAltitude"),
+    )
+    return {out: raw.get(src) for out, src in keys if raw.get(src) is not None}
+
+
+def _series_entries(raw: Any, digits: int = 1) -> List[Dict[str, Any]]:
+    """Biometric stats series ({from, series, value}) as date/value, repeats dropped."""
+    entries: List[Dict[str, Any]] = []
+    last: Dict[Any, Any] = {}
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or not isinstance(item.get("value"), (int, float)):
+            continue
+        series, value = item.get("series"), round(item["value"], digits)
+        if last.get(series) == value:
+            continue
+        last[series] = value
+        entries.append({"date": item.get("from"), "sport": series, "value": value})
+    return entries
+
+
 def _device_id(value: Any) -> Optional[str]:
     """Normalize Garmin device IDs for comparing map keys with device records."""
     return str(value) if value is not None else None
@@ -2080,5 +2173,339 @@ def register_tools(app):
             result["heat_acclimation_change"] = round(heat - prev, 1)
 
         return json.dumps(result, indent=2)
+
+    @app.tool()
+    async def get_performance_metric(
+        metric: Literal[
+            "critical_swim_speed", "cycling_ability", "running_economy",
+            "stamina_running", "stamina_cycling", "heat_altitude_acclimation",
+            "ftp_cycling", "ftp_running", "power_to_weight",
+        ],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> str:
+        """Get one of Garmin's performance metrics, latest or as a history
+
+        Without dates: the latest value. With start_date (and optionally
+        end_date, default today): the history, at most 366 days.
+        ftp_cycling, ftp_running and power_to_weight only exist as a history;
+        without dates they cover the last 90 days. stamina_* is latest only.
+
+        - critical_swim_speed: raw_value (Garmin's mm/s), speed_m_per_s and
+          pace_per_100m
+        - cycling_ability: aerobic endurance / aerobic capacity / anaerobic
+          capacity scores and profile type (latest adds Garmin's feedback)
+        - running_economy: score and classification
+        - stamina_running / stamina_cycling: Garmin's stamina curve
+        - heat_altitude_acclimation: heat acclimation %, altitude acclimation, trends
+        - ftp_cycling / ftp_running: FTP in watts, one entry per change
+        - power_to_weight: W/kg per sport, one entry per change
+
+        Args:
+            metric: Which metric
+            start_date: Start of the history, YYYY-MM-DD (omit for latest)
+            end_date: End of the history, YYYY-MM-DD (default today)
+        """
+        try:
+            history = start_date is not None or metric in _RANGE_ONLY_METRICS
+            if history and metric in _LATEST_ONLY_METRICS:
+                return f"{metric} has no history; call it without dates."
+            if not history:
+                if metric == "critical_swim_speed":
+                    raw = garmin_client.get_critical_swim_speed()
+                    data: Any = _css_entry(raw) if raw else None
+                elif metric == "cycling_ability":
+                    raw = garmin_client.get_cycling_ability()
+                    data = _cycling_ability_entry(raw) if raw else None
+                elif metric == "running_economy":
+                    raw = garmin_client.get_running_economy()
+                    data = (
+                        {"date": raw.get("calendarDate"), "score": raw.get("score"),
+                         "classification": raw.get("classification")}
+                        if raw and raw.get("score") is not None else None
+                    )
+                elif metric in _LATEST_ONLY_METRICS:
+                    data = garmin_client.get_stamina_curve(
+                        sport_type=metric.split("_", 1)[1]
+                    ) or None
+                else:
+                    raw = garmin_client.get_heat_altitude_acclimation()
+                    data = _acclimation_entry(raw) if raw else None
+                if not data:
+                    return f"No {metric} data found."
+                return json.dumps({"metric": metric, "latest": data}, indent=2)
+
+            start, end = _metric_dates(start_date, end_date)
+            s, e = start.isoformat(), end.isoformat()
+            if metric == "critical_swim_speed":
+                raw = garmin_client.get_critical_swim_speed_range(s, e) or {}
+                entries: List[Dict[str, Any]] = [
+                    _css_entry(r) for r in raw.get("criticalSwimSpeedDTOList") or []
+                    if isinstance(r, dict)
+                ]
+            elif metric == "cycling_ability":
+                entries = []
+                chunk_start = start
+                while chunk_start <= end:
+                    chunk_end = min(
+                        chunk_start + datetime.timedelta(days=_CYCLING_ABILITY_CHUNK_DAYS - 1), end
+                    )
+                    raw = garmin_client.get_cycling_ability_range(
+                        chunk_start.isoformat(), chunk_end.isoformat()
+                    ) or {}
+                    for day in sorted((raw.get("cyclingAbilitiesMap") or {})):
+                        # Feedback text repeats daily; the history keeps the scores.
+                        entry = _cycling_ability_entry(raw["cyclingAbilitiesMap"][day])
+                        entries.append({k: v for k, v in entry.items() if not k.endswith("_feedback")})
+                    chunk_start = chunk_end + datetime.timedelta(days=1)
+            elif metric == "running_economy":
+                entries = [
+                    {"date": r.get("calendarDate"), "score": r.get("score"),
+                     "classification": r.get("classification")}
+                    for r in garmin_client.get_running_economy_range(s, e) or []
+                    if isinstance(r, dict) and r.get("score") is not None
+                ]
+            elif metric == "heat_altitude_acclimation":
+                entries = [
+                    _acclimation_entry(r)
+                    for r in garmin_client.get_heat_altitude_acclimation_range(s, e) or []
+                    if isinstance(r, dict)
+                ]
+            elif metric in ("ftp_cycling", "ftp_running"):
+                entries = _series_entries(garmin_client.get_functional_threshold_power_range(
+                    s, e, sport=metric.split("_", 1)[1].upper()
+                ), digits=0)
+            else:
+                entries = _series_entries(garmin_client.get_power_to_weight_range(s, e), digits=2)
+            if not entries:
+                return f"No {metric} data found between {s} and {e}."
+            return json.dumps({
+                "metric": metric, "start_date": s, "end_date": e,
+                "count": len(entries), "history": entries,
+            }, indent=2)
+        except Exception as e:
+            return f"Error retrieving {metric}: {str(e)}"
+
+    @app.tool()
+    async def get_power_zones(sport: Optional[str] = None) -> str:
+        """Get your power zones: FTP and the watt range of each zone, per sport
+
+        The FTP stored with the zones can differ from Garmin's FTP history
+        (get_performance_metric ftp_cycling); compare the two.
+
+        Args:
+            sport: Optional Garmin sport key, e.g. "cycling" or "running"
+        """
+        try:
+            zones = garmin_client.get_power_zones() or []
+            curated = []
+            for z in zones:
+                if not isinstance(z, dict):
+                    continue
+                if sport and str(z.get("sport", "")).upper() != sport.strip().upper():
+                    continue
+                floors = [z.get(f"zone{i}Floor") for i in range(1, 8)]
+                curated.append({
+                    "sport": z.get("sport"),
+                    "ftp_watts": z.get("functionalThresholdPower"),
+                    "zones": [
+                        {"zone": i + 1, "from_watts": floors[i],
+                         "to_watts": floors[i + 1] if i < 6 else None}
+                        for i in range(7) if floors[i] is not None
+                    ],
+                })
+            if not curated:
+                return f"No power zones found{f' for {sport}' if sport else ''}."
+            return json.dumps(curated, indent=2)
+        except Exception as e:
+            return f"Error retrieving power zones: {str(e)}"
+
+    @app.tool()
+    async def set_power_zones(
+        sport: str, ftp_watts: float, confirm: bool = False
+    ) -> str:
+        """Set the FTP of a sport's power zones; the zone floors scale with it
+
+        Each zone floor keeps its percentage of FTP (e.g. a zone starting at
+        76% of the old FTP starts at 76% of the new one). Call once with
+        confirm=false (the default) to preview old and
+        new zones, then again with confirm=true to write them. Safe to repeat
+        with the same arguments.
+
+        Args:
+            sport: Garmin sport key as in get_power_zones, e.g. "cycling"
+            ftp_watts: New FTP in watts
+            confirm: Must be true to write. Default false returns a preview.
+        """
+        try:
+            if not ftp_watts or ftp_watts <= 0:
+                return "Error setting power zones: ftp_watts must be positive."
+            key = sport.strip().upper()
+            current = next(
+                (z for z in garmin_client.get_power_zones() or []
+                 if isinstance(z, dict) and str(z.get("sport", "")).upper() == key),
+                None,
+            )
+            if not current:
+                return f"No power zones found for {sport}."
+            old_ftp = current.get("functionalThresholdPower")
+            if not old_ftp:
+                return f"Error setting power zones: {sport} has no current FTP to scale from."
+            factor = ftp_watts / old_ftp
+            updated = dict(current)
+            updated["functionalThresholdPower"] = float(ftp_watts)
+            for i in range(1, 8):
+                floor = current.get(f"zone{i}Floor")
+                if isinstance(floor, (int, float)):
+                    updated[f"zone{i}Floor"] = float(round(floor * factor))
+            summary = {
+                "sport": current.get("sport"),
+                "old": {"ftp_watts": old_ftp, "zone_floors": [current.get(f"zone{i}Floor") for i in range(1, 8)]},
+                "new": {"ftp_watts": float(ftp_watts), "zone_floors": [updated.get(f"zone{i}Floor") for i in range(1, 8)]},
+            }
+            if not confirm:
+                return json.dumps({
+                    "status": "needs_confirmation", **summary,
+                    "message": "Call again with confirm=true to write these zones.",
+                }, indent=2)
+            garmin_client.update_power_zones([updated])
+            return json.dumps({"status": "success", **summary, "message": "Power zones updated"}, indent=2)
+        except Exception as e:
+            return f"Error setting power zones: {str(e)}"
+
+    @app.tool()
+    async def get_activity_power_curve(activity_id: int) -> str:
+        """Get one activity's best average power per duration (1 s up to 5 h)
+
+        get_power_duration_curve gives the season best across activities.
+
+        Args:
+            activity_id: Activity ID
+        """
+        try:
+            raw = garmin_client.get_activity_power_curve(activity_id) or {}
+            curve = {}
+            for key, value in raw.items():
+                if key.startswith("maxAvgPower_") and isinstance(value, (int, float)):
+                    seconds = int(key.split("_", 1)[1])
+                    label = f"{seconds}s" if seconds < 60 else (
+                        f"{seconds // 60}min" if seconds < 3600 else f"{seconds // 3600}h"
+                    )
+                    curve[label] = value
+            if not curve:
+                return f"No power curve for activity {activity_id} (no power data)."
+            return json.dumps({"activity_id": activity_id, "best_avg_watts": curve}, indent=2)
+        except Exception as e:
+            return f"Error retrieving activity power curve: {str(e)}"
+
+    @app.tool()
+    async def get_fastest_splits(
+        start_date: str,
+        end_date: str,
+        activity_type: str = "running",
+        number_of_bests: int = 5,
+    ) -> str:
+        """Get your fastest times per distance (1 km, 5 km, ...) in a date range
+
+        Args:
+            start_date: YYYY-MM-DD
+            end_date: YYYY-MM-DD
+            activity_type: Garmin activity type, default "running"
+            number_of_bests: Bests per distance (1-10, default 5)
+        """
+        try:
+            number_of_bests = min(max(1, number_of_bests), 10)
+            raw = garmin_client.get_fastest_splits(
+                start_date, end_date, activity_type=activity_type,
+                number_of_bests=number_of_bests,
+            ) or []
+            by_distance: Dict[str, List[Dict[str, Any]]] = {}
+            for s in raw:
+                if not isinstance(s, dict) or not isinstance(s.get("time"), (int, float)):
+                    continue
+                distance = s.get("distance")
+                seconds = round(s["time"])
+                by_distance.setdefault(f"{distance} m", []).append({
+                    "time": f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+                            if seconds >= 3600 else f"{seconds // 60}:{seconds % 60:02d}",
+                    "seconds": round(s["time"], 1),
+                    "pace_per_km": _pace_per_km(distance / s["time"]) if distance and s["time"] else None,
+                    "activity_id": s.get("activityId"),
+                    "date": s.get("activityDate"),
+                })
+            if not by_distance:
+                return f"No fastest splits found between {start_date} and {end_date}."
+            return json.dumps({"activity_type": activity_type, "bests": by_distance}, indent=2)
+        except Exception as e:
+            return f"Error retrieving fastest splits: {str(e)}"
+
+    @app.tool()
+    async def get_training_load_activities(start_date: str, end_date: str) -> str:
+        """Get each activity's training load and training-effect label in a date range
+
+        Args:
+            start_date: YYYY-MM-DD
+            end_date: YYYY-MM-DD
+        """
+        try:
+            raw = garmin_client.get_training_load_activities(start_date, end_date) or []
+            activities = [
+                {
+                    "activity_id": a.get("activityId"),
+                    "start_local": a.get("startLocal"),
+                    "training_load": round(a["activityTrainingLoad"], 1)
+                    if isinstance(a.get("activityTrainingLoad"), (int, float)) else None,
+                    "training_effect_label": a.get("trainingEffectLabel"),
+                }
+                for a in raw if isinstance(a, dict)
+            ]
+            if not activities:
+                return f"No activities found between {start_date} and {end_date}."
+            total = sum(a["training_load"] or 0 for a in activities)
+            return json.dumps({
+                "count": len(activities), "total_training_load": round(total, 1),
+                "activities": activities,
+            }, indent=2)
+        except Exception as e:
+            return f"Error retrieving training load activities: {str(e)}"
+
+    @app.tool()
+    async def get_one_rep_max(
+        exercise_type: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> str:
+        """Get Garmin's estimated one-rep-max (1RM) values for strength exercises
+
+        Without dates: current values (all exercises, or one exercise_type).
+        With exercise_type and start_date/end_date: that exercise's history.
+        When there is no 1RM data, the exercises Garmin can estimate 1RM for
+        are listed instead.
+
+        Args:
+            exercise_type: Garmin exercise key, e.g. "BARBELL_BACK_SQUAT"
+            start_date: History start, YYYY-MM-DD (needs exercise_type)
+            end_date: History end, YYYY-MM-DD (default today)
+        """
+        try:
+            if start_date is not None:
+                if not exercise_type:
+                    return "Error retrieving one-rep max: a history needs exercise_type."
+                end = end_date or datetime.date.today().isoformat()
+                data: Any = garmin_client.get_one_rep_max_history(exercise_type, start_date, end)
+            else:
+                data = garmin_client.get_one_rep_max(exercise_type=exercise_type)
+            if data:
+                return json.dumps({"one_rep_max": data}, indent=2)
+            benchmarks = garmin_client.get_strength_benchmarks() or []
+            return json.dumps({
+                "one_rep_max": None,
+                "message": "No 1RM data. Garmin estimates 1RM for these exercises:",
+                "supported_exercises": [
+                    b.get("benchmarkKey") for b in benchmarks if isinstance(b, dict)
+                ],
+            }, indent=2)
+        except Exception as e:
+            return f"Error retrieving one-rep max: {str(e)}"
 
     return app

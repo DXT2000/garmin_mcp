@@ -2216,3 +2216,233 @@ async def test_get_vo2max_trend_rejects_unknown_sport(
             {"start_date": "2024-01-14", "end_date": "2024-01-15", "sport": "swimming"},
         )
     mock_garmin_client.connectapi.assert_not_called()
+
+
+# --- get_performance_metric and friends -------------------------------------
+
+def _text(result):
+    return result[0][0].text
+
+
+@pytest.mark.asyncio
+async def test_performance_metric_css_reads_millimetres_per_second(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_critical_swim_speed.return_value = {
+        "criticalSwimSpeed": 758, "measurementTimestampLocal": "2026-10-23T19:10:49.0",
+        "biometricSourceType": "CHANGE_LOG",
+    }
+    latest = json.loads(_text(await app_with_training.call_tool(
+        "get_performance_metric", {"metric": "critical_swim_speed"}
+    )))["latest"]
+    assert latest == {
+        "date": "2026-10-23", "raw_value": 758, "speed_m_per_s": 0.758,
+        "pace_per_100m": "2:12", "source": "CHANGE_LOG",
+    }
+
+
+@pytest.mark.asyncio
+async def test_performance_metric_cycling_ability_history_is_fetched_in_30_day_chunks(
+    app_with_training, mock_garmin_client
+):
+    def window(start, end):
+        return {"cyclingAbilitiesMap": {start: {
+            "calendarDate": start, "aerobicEndurance": 49, "profileType": "CHALLENGER",
+            "aerobicEnduranceFeedback": "MODERATE_VO2MAX_DEFICIT",
+        }}}
+    mock_garmin_client.get_cycling_ability_range.side_effect = window
+    payload = json.loads(_text(await app_with_training.call_tool("get_performance_metric", {
+        "metric": "cycling_ability", "start_date": "2026-09-01", "end_date": "2026-10-15",
+    })))
+    calls = [c.args for c in mock_garmin_client.get_cycling_ability_range.call_args_list]
+    assert calls == [("2026-09-01", "2026-09-30"), ("2026-10-01", "2026-10-15")]
+    assert payload["history"][0] == {
+        "date": "2026-09-01", "aerobic_endurance": 49, "profile_type": "CHALLENGER",
+    }
+
+
+@pytest.mark.asyncio
+async def test_performance_metric_ftp_defaults_to_90_days_and_drops_repeats(
+    app_with_training, mock_garmin_client
+):
+    mock_garmin_client.get_functional_threshold_power_range.return_value = [
+        {"from": "2026-09-03", "series": "cycling", "value": 201.0},
+        {"from": "2026-09-07", "series": "cycling", "value": 201.0},
+        {"from": "2026-10-23", "series": "cycling", "value": 182.0},
+    ]
+    payload = json.loads(_text(await app_with_training.call_tool(
+        "get_performance_metric", {"metric": "ftp_cycling", "end_date": "2026-10-26"}
+    )))
+    assert payload["start_date"] == "2026-07-28"
+    assert [h["value"] for h in payload["history"]] == [201.0, 182.0]
+    assert mock_garmin_client.get_functional_threshold_power_range.call_args.kwargs == {"sport": "CYCLING"}
+
+
+@pytest.mark.asyncio
+async def test_performance_metric_stamina_has_no_history(app_with_training, mock_garmin_client):
+    result = await app_with_training.call_tool(
+        "get_performance_metric", {"metric": "stamina_running", "start_date": "2026-10-01"}
+    )
+    assert "has no history" in _text(result)
+    mock_garmin_client.get_stamina_curve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_performance_metric_running_economy_history_drops_empty_days(
+    app_with_training, mock_garmin_client
+):
+    mock_garmin_client.get_running_economy_range.return_value = [
+        {"calendarDate": "2026-10-01", "score": None, "classification": None},
+        {"calendarDate": "2026-10-02", "score": 223, "classification": "INTERMEDIATE"},
+    ]
+    payload = json.loads(_text(await app_with_training.call_tool(
+        "get_performance_metric", {"metric": "running_economy", "start_date": "2026-10-01", "end_date": "2026-10-02"}
+    )))
+    assert payload["history"] == [{"date": "2026-10-02", "score": 223, "classification": "INTERMEDIATE"}]
+
+
+@pytest.mark.asyncio
+async def test_performance_metric_rejects_range_over_366_days(app_with_training, mock_garmin_client):
+    result = await app_with_training.call_tool("get_performance_metric", {
+        "metric": "running_economy", "start_date": "2024-01-01", "end_date": "2026-01-01",
+    })
+    assert "at most 366 days" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_performance_metric_exception(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_running_economy.side_effect = Exception("API Error")
+    result = await app_with_training.call_tool("get_performance_metric", {"metric": "running_economy"})
+    assert "Error retrieving running_economy" in _text(result)
+
+
+ZONES = [{
+    "sport": "CYCLING", "functionalThresholdPower": 182.0,
+    "zone1Floor": 0.0, "zone2Floor": 99.0, "zone3Floor": 135.0, "zone4Floor": 164.0,
+    "zone5Floor": 192.0, "zone6Floor": 220.0, "zone7Floor": 273.0, "userLocalTime": None,
+}]
+
+
+@pytest.mark.asyncio
+async def test_get_power_zones_gives_watt_ranges(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_power_zones.return_value = ZONES
+    zones = json.loads(_text(await app_with_training.call_tool("get_power_zones", {"sport": "cycling"})))
+    assert zones[0]["ftp_watts"] == 182.0
+    assert zones[0]["zones"][1] == {"zone": 2, "from_watts": 99.0, "to_watts": 135.0}
+    assert zones[0]["zones"][6] == {"zone": 7, "from_watts": 273.0, "to_watts": None}
+
+
+@pytest.mark.asyncio
+async def test_get_power_zones_exception(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_power_zones.side_effect = Exception("API Error")
+    assert "Error retrieving power zones" in _text(await app_with_training.call_tool("get_power_zones", {}))
+
+
+@pytest.mark.asyncio
+async def test_set_power_zones_without_confirm_only_previews(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_power_zones.return_value = ZONES
+    payload = json.loads(_text(await app_with_training.call_tool(
+        "set_power_zones", {"sport": "cycling", "ftp_watts": 201}
+    )))
+    assert payload["status"] == "needs_confirmation"
+    assert payload["new"]["zone_floors"] == [0.0, 109.0, 149.0, 181.0, 212.0, 243.0, 302.0]
+    mock_garmin_client.update_power_zones.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_set_power_zones_with_confirm_writes_scaled_zones(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_power_zones.return_value = ZONES
+    await app_with_training.call_tool(
+        "set_power_zones", {"sport": "cycling", "ftp_watts": 201, "confirm": True}
+    )
+    (written,), = mock_garmin_client.update_power_zones.call_args.args
+    assert written["functionalThresholdPower"] == 201.0
+    assert written["zone4Floor"] == 181.0 and written["sport"] == "CYCLING"
+
+
+@pytest.mark.asyncio
+async def test_set_power_zones_exception(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_power_zones.side_effect = Exception("API Error")
+    result = await app_with_training.call_tool("set_power_zones", {"sport": "cycling", "ftp_watts": 200})
+    assert "Error setting power zones" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_get_activity_power_curve_labels_durations(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_activity_power_curve.return_value = {
+        "activityId": 1, "maxAvgPower_1": 223, "maxAvgPower_60": 140,
+        "maxAvgPower_3600": 101, "maxAvgPower_7200": None,
+    }
+    payload = json.loads(_text(await app_with_training.call_tool("get_activity_power_curve", {"activity_id": 1})))
+    assert payload["best_avg_watts"] == {"1s": 223, "1min": 140, "1h": 101}
+
+
+@pytest.mark.asyncio
+async def test_get_activity_power_curve_exception(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_activity_power_curve.side_effect = Exception("API Error")
+    result = await app_with_training.call_tool("get_activity_power_curve", {"activity_id": 1})
+    assert "Error retrieving activity power curve" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_get_fastest_splits_groups_by_distance(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_fastest_splits.return_value = [
+        {"distance": 1000, "activityId": 5, "activityDate": "2026-10-25", "time": 273.16},
+        {"distance": 5000, "activityId": 6, "activityDate": "2026-10-20", "time": 1500.0},
+    ]
+    payload = json.loads(_text(await app_with_training.call_tool(
+        "get_fastest_splits", {"start_date": "2026-08-01", "end_date": "2026-10-26"}
+    )))
+    assert payload["bests"]["1000 m"][0]["time"] == "4:33"
+    assert payload["bests"]["5000 m"][0]["pace_per_km"] == "5:00"
+
+
+@pytest.mark.asyncio
+async def test_get_fastest_splits_exception(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_fastest_splits.side_effect = Exception("API Error")
+    result = await app_with_training.call_tool(
+        "get_fastest_splits", {"start_date": "2026-08-01", "end_date": "2026-10-26"}
+    )
+    assert "Error retrieving fastest splits" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_get_training_load_activities_totals(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_training_load_activities.return_value = [
+        {"activityId": 1, "activityTrainingLoad": 57.14, "trainingEffectLabel": "RECOVERY", "startLocal": "2026-10-21T20:37:20"},
+        {"activityId": 2, "activityTrainingLoad": 116.0, "trainingEffectLabel": "TEMPO", "startLocal": "2026-10-22T20:36:45"},
+    ]
+    payload = json.loads(_text(await app_with_training.call_tool(
+        "get_training_load_activities", {"start_date": "2026-10-20", "end_date": "2026-10-26"}
+    )))
+    assert payload["total_training_load"] == 173.1 and payload["activities"][0]["training_load"] == 57.1
+
+
+@pytest.mark.asyncio
+async def test_get_training_load_activities_exception(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_training_load_activities.side_effect = Exception("API Error")
+    result = await app_with_training.call_tool(
+        "get_training_load_activities", {"start_date": "2026-10-20", "end_date": "2026-10-26"}
+    )
+    assert "Error retrieving training load activities" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_get_one_rep_max_lists_supported_exercises_when_empty(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_one_rep_max.return_value = []
+    mock_garmin_client.get_strength_benchmarks.return_value = [
+        {"benchmarkKey": "BARBELL_BACK_SQUAT", "benchmarkCategoryKey": "SQUAT"},
+    ]
+    payload = json.loads(_text(await app_with_training.call_tool("get_one_rep_max", {})))
+    assert payload["one_rep_max"] is None and payload["supported_exercises"] == ["BARBELL_BACK_SQUAT"]
+
+
+@pytest.mark.asyncio
+async def test_get_one_rep_max_history_needs_exercise(app_with_training, mock_garmin_client):
+    result = await app_with_training.call_tool("get_one_rep_max", {"start_date": "2026-09-01"})
+    assert "needs exercise_type" in _text(result)
+    mock_garmin_client.get_one_rep_max_history.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_one_rep_max_exception(app_with_training, mock_garmin_client):
+    mock_garmin_client.get_one_rep_max.side_effect = Exception("API Error")
+    assert "Error retrieving one-rep max" in _text(await app_with_training.call_tool("get_one_rep_max", {}))

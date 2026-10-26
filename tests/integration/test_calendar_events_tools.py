@@ -464,3 +464,233 @@ async def test_get_calendar_events_error_is_caught(
     )
 
     assert "Error retrieving calendar events" in _result_text(result)
+
+
+# --- event ids, location from the detail record -----------------------------
+
+@pytest.mark.asyncio
+async def test_get_calendar_events_takes_id_and_location_from_detail_when_feed_lacks_them(
+    app_with_calendar_events, mock_garmin_client
+):
+    """Subscribed races arrive with id null; private ones without location."""
+    mock_garmin_client.get_scheduled_workouts.return_value = _month(_race("2027-06-20", id=None))
+    mock_garmin_client.connectapi.return_value = {"id": 29001068, "location": "Hoorn, NL"}
+    result = await app_with_calendar_events.call_tool(
+        "get_calendar_events", {"start_date": "2027-06-01", "end_date": "2027-06-30"}
+    )
+    event = json.loads(_result_text(result))["events"][0]
+    assert event["event_id"] == 29001068
+    assert event["location"] == "Hoorn, NL"
+
+
+# --- create / update / delete calendar events -------------------------------
+
+@pytest.mark.asyncio
+async def test_create_calendar_event_builds_private_race_payload(
+    app_with_calendar_events, mock_garmin_client
+):
+    mock_garmin_client.create_calendar_event.return_value = {
+        "id": 7, "eventName": "Halve", "date": "2026-12-30",
+    }
+    result = await app_with_calendar_events.call_tool("create_calendar_event", {
+        "name": "Halve", "event_date": "2026-12-30", "distance_km": 21.1,
+        "goal_time_seconds": 6300, "start_time_local": "09:30", "time_zone": "Europe/Amsterdam",
+    })
+    assert json.loads(_result_text(result))["event_id"] == 7
+    event = mock_garmin_client.create_calendar_event.call_args.args[0]
+    assert event["race"] is True and event["eventPrivacy"]["label"] == "PRIVATE"
+    assert event["completionTarget"] == {"value": 21.1, "unit": "kilometer", "unitType": "distance"}
+    assert event["eventCustomization"] == {
+        "isPrimaryEvent": False,
+        "customGoal": {"value": 6300.0, "unit": "second", "unitType": "time"},
+    }
+    assert event["eventTimeLocal"] == {"startTimeHhMm": "09:30", "timeZoneId": "Europe/Amsterdam"}
+
+
+@pytest.mark.asyncio
+async def test_create_calendar_event_needs_time_zone_with_start_time(
+    app_with_calendar_events, mock_garmin_client
+):
+    result = await app_with_calendar_events.call_tool("create_calendar_event", {
+        "name": "X", "event_date": "2026-12-30", "start_time_local": "09:30",
+    })
+    assert "must be given together" in _result_text(result)
+    mock_garmin_client.create_calendar_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_calendar_event_exception(app_with_calendar_events, mock_garmin_client):
+    mock_garmin_client.create_calendar_event.side_effect = Exception("API Error")
+    result = await app_with_calendar_events.call_tool(
+        "create_calendar_event", {"name": "X", "event_date": "2026-12-30"}
+    )
+    assert "Error creating calendar event" in _result_text(result)
+
+
+EVENT_DETAIL = {
+    "id": 7, "eventName": "Halve", "date": "2026-12-30",
+    "eventTimeLocal": {"startTimeHhMm": "09:30", "timeZoneId": "Europe/Paris"},
+    "eventCustomization": {
+        "customGoal": {"value": 6300.0, "unit": "second", "unitType": "time"},
+        "isPrimaryEvent": False, "trainingPlanId": None,
+    },
+    "location": "Test, NL",
+}
+
+
+@pytest.mark.asyncio
+async def test_update_calendar_event_patches_full_object(
+    app_with_calendar_events, mock_garmin_client
+):
+    mock_garmin_client.get_calendar_event.return_value = dict(EVENT_DETAIL)
+    await app_with_calendar_events.call_tool("update_calendar_event", {
+        "event_id": 7, "goal_time_seconds": 0, "start_time_local": "10:00",
+    })
+    event_id, event = mock_garmin_client.update_calendar_event.call_args.args
+    assert event_id == 7
+    assert event["eventCustomization"]["customGoal"] is None
+    assert event["eventCustomization"]["isPrimaryEvent"] is False
+    assert event["eventTimeLocal"] == {"startTimeHhMm": "10:00", "timeZoneId": "Europe/Paris"}
+    assert event["location"] == "Test, NL" and event["eventName"] == "Halve"
+
+
+@pytest.mark.asyncio
+async def test_update_calendar_event_exception(app_with_calendar_events, mock_garmin_client):
+    mock_garmin_client.get_calendar_event.side_effect = Exception("API Error")
+    result = await app_with_calendar_events.call_tool(
+        "update_calendar_event", {"event_id": 7, "name": "Y"}
+    )
+    assert "Error updating calendar event" in _result_text(result)
+
+
+@pytest.mark.asyncio
+async def test_delete_calendar_event_without_confirm_only_previews(
+    app_with_calendar_events, mock_garmin_client
+):
+    mock_garmin_client.get_calendar_event.return_value = dict(EVENT_DETAIL)
+    payload = json.loads(_result_text(
+        await app_with_calendar_events.call_tool("delete_calendar_event", {"event_id": 7})
+    ))
+    assert payload["status"] == "needs_confirmation" and payload["name"] == "Halve"
+    mock_garmin_client.delete_calendar_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_calendar_event_with_confirm_deletes(
+    app_with_calendar_events, mock_garmin_client
+):
+    payload = json.loads(_result_text(await app_with_calendar_events.call_tool(
+        "delete_calendar_event", {"event_id": 7, "confirm": True}
+    )))
+    assert payload["status"] == "success"
+    mock_garmin_client.delete_calendar_event.assert_called_once_with(7)
+
+
+@pytest.mark.asyncio
+async def test_delete_calendar_event_exception(app_with_calendar_events, mock_garmin_client):
+    mock_garmin_client.delete_calendar_event.side_effect = Exception("API Error")
+    result = await app_with_calendar_events.call_tool(
+        "delete_calendar_event", {"event_id": 7, "confirm": True}
+    )
+    assert "Error deleting calendar event" in _result_text(result)
+
+
+# --- calendar notes ------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_calendar_note(app_with_calendar_events, mock_garmin_client):
+    mock_garmin_client.create_calendar_note.return_value = {
+        "id": 9, "noteName": "Rustdag", "content": "", "date": "2026-12-30",
+    }
+    payload = json.loads(_result_text(await app_with_calendar_events.call_tool(
+        "create_calendar_note", {"note_date": "2026-12-30", "title": "Rustdag"}
+    )))
+    assert payload["note_id"] == 9
+    mock_garmin_client.create_calendar_note.assert_called_once_with("2026-12-30", "Rustdag", "")
+
+
+@pytest.mark.asyncio
+async def test_create_calendar_note_exception(app_with_calendar_events, mock_garmin_client):
+    mock_garmin_client.create_calendar_note.side_effect = Exception("API Error")
+    result = await app_with_calendar_events.call_tool(
+        "create_calendar_note", {"note_date": "2026-12-30", "title": "X"}
+    )
+    assert "Error creating calendar note" in _result_text(result)
+
+
+@pytest.mark.asyncio
+async def test_update_calendar_note_keeps_unpassed_fields(
+    app_with_calendar_events, mock_garmin_client
+):
+    mock_garmin_client.connectapi.return_value = {
+        "id": 9, "noteName": "Rustdag", "content": "alleen mobiliteit", "date": "2026-12-30",
+    }
+    await app_with_calendar_events.call_tool(
+        "update_calendar_note", {"note_id": 9, "note_date": "2026-12-31"}
+    )
+    mock_garmin_client.connectapi.assert_called_once_with("/calendar-service/note/9")
+    mock_garmin_client.update_calendar_note.assert_called_once_with(
+        9, "2026-12-31", "Rustdag", "alleen mobiliteit"
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_calendar_note_exception(app_with_calendar_events, mock_garmin_client):
+    mock_garmin_client.connectapi.return_value = {"id": 9, "noteName": "R", "content": "", "date": "2026-12-30"}
+    mock_garmin_client.update_calendar_note.side_effect = Exception("API Error")
+    result = await app_with_calendar_events.call_tool("update_calendar_note", {"note_id": 9, "title": "Y"})
+    assert "Error updating calendar note" in _result_text(result)
+
+
+@pytest.mark.asyncio
+async def test_delete_calendar_note_requires_confirm(app_with_calendar_events, mock_garmin_client):
+    payload = json.loads(_result_text(
+        await app_with_calendar_events.call_tool("delete_calendar_note", {"note_id": 9})
+    ))
+    assert payload["status"] == "needs_confirmation"
+    mock_garmin_client.delete_calendar_note.assert_not_called()
+    await app_with_calendar_events.call_tool("delete_calendar_note", {"note_id": 9, "confirm": True})
+    mock_garmin_client.delete_calendar_note.assert_called_once_with(9)
+
+
+@pytest.mark.asyncio
+async def test_delete_calendar_note_exception(app_with_calendar_events, mock_garmin_client):
+    mock_garmin_client.delete_calendar_note.side_effect = Exception("API Error")
+    result = await app_with_calendar_events.call_tool(
+        "delete_calendar_note", {"note_id": 9, "confirm": True}
+    )
+    assert "Error deleting calendar note" in _result_text(result)
+
+
+# --- calendar week -------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_calendar_week_lists_items_with_note_text(
+    app_with_calendar_events, mock_garmin_client
+):
+    mock_garmin_client.get_calendar_week.return_value = {
+        "startDate": "2026-12-28", "endDate": "2027-01-03",
+        "calendarItems": [
+            {"id": 1, "itemType": "workout", "title": "Duurloop", "date": "2026-12-29",
+             "sportTypeKey": "running", "workoutId": 55},
+            {"id": 9, "itemType": "note", "title": "Rustdag", "date": "2026-12-30"},
+        ],
+    }
+    mock_garmin_client.connectapi.return_value = {"id": 9, "content": "alleen mobiliteit"}
+    payload = json.loads(_result_text(
+        await app_with_calendar_events.call_tool("get_calendar_week", {"week_date": "2026-12-30"})
+    ))
+    assert payload["count"] == 2
+    assert payload["items"][0] == {
+        "id": 1, "type": "workout", "date": "2026-12-29", "title": "Duurloop",
+        "sport": "running", "workout_id": 55,
+    }
+    assert payload["items"][1]["content"] == "alleen mobiliteit"
+    mock_garmin_client.get_calendar_week.assert_called_once_with("2026-12-30", first_day_of_week=1)
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_week_exception(app_with_calendar_events, mock_garmin_client):
+    mock_garmin_client.get_calendar_week.side_effect = Exception("API Error")
+    result = await app_with_calendar_events.call_tool("get_calendar_week", {})
+    assert "Error retrieving calendar week" in _result_text(result)

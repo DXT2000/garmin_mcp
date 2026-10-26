@@ -312,12 +312,13 @@ categories — anything else, including `OTHER` and `UNASSIGNED`, is rejected wi
 }
 ```
 
-With `resolve_exercises: true`, the whole batch is checked before JSON construction.
-Every item must resolve before anything is uploaded; failures return all unresolved
-items and alternatives. A valid supplied `category` + `exercise_name` pair is used
-as-is while `name` remains the readable description. If the public catalog and its
-cache are both unavailable, creation uses the legacy inputs and the success response
-contains an explicit warning. Leaving the flag false keeps the previous behavior and
+`resolve_exercises` defaults to `true`: the
+whole batch is checked before JSON construction. Every item must resolve before
+anything is uploaded; failures return all unresolved items and alternatives. A valid
+supplied `category` + `exercise_name` pair is used as-is while `name` remains the
+readable description. If the public catalog and its cache are both unavailable,
+creation uses the legacy inputs and the success response contains an explicit
+warning. Passing `resolve_exercises: false` keeps the previous free-text behavior and
 does not load the catalog.
 
 Returns: `{"status": "success", "workout_id": 1234567890, ...}`

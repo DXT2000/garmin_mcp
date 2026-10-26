@@ -31,6 +31,16 @@ def app_with_builders(mock_garmin_client):
     return app
 
 
+@pytest.fixture(autouse=True)
+def exercise_catalog_unavailable(monkeypatch):
+    """Strength tests here exercise the builder, not catalog resolution, so the
+    catalog is unavailable unless a test mocks resolve_strength_exercises."""
+    def unavailable():
+        raise exercise_catalog.CatalogError("catalog disabled in builder tests")
+
+    monkeypatch.setattr(exercise_catalog, "load_catalog", unavailable)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name,arguments,field", [
     ("create_run_workout", {"run_seconds": 0}, "run_seconds"),
@@ -571,14 +581,33 @@ async def test_create_strength_catalog_outage_uses_legacy_upload(
 
 
 @pytest.mark.asyncio
-async def test_create_strength_default_does_not_resolve(
+async def test_create_strength_resolves_by_default(
+    app_with_builders, mock_garmin_client, monkeypatch
+):
+    resolve = MagicMock(return_value={
+        "status": "needs_review", "resolved_exercises": [],
+        "unresolved_items": [{"index": 0, "status": "ambiguous", "alternatives": []}],
+    })
+    monkeypatch.setattr(exercise_catalog, "resolve_strength_exercises", resolve)
+    result = await app_with_builders.call_tool("create_strength_workout", {
+        "name": "Core", "exercises": [{"name": "raise", "sets": 1, "reps": 2}],
+    })
+    resolve.assert_called_once()
+    assert json.loads(result[0][0].text)["status"] == "needs_review"
+    mock_garmin_client.upload_workout.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_strength_resolve_false_uploads_free_text_without_catalog(
     app_with_builders, mock_garmin_client, monkeypatch
 ):
     resolve = MagicMock(side_effect=AssertionError("catalog should not load"))
     monkeypatch.setattr(exercise_catalog, "resolve_strength_exercises", resolve)
     mock_garmin_client.upload_workout.return_value = {"workoutId": 44, "workoutName": "Legacy"}
     await app_with_builders.call_tool("create_strength_workout", {
-        "name": "Legacy", "exercises": [{"name": "Custom", "sets": 1, "reps": 2}],
+        "name": "Legacy", "resolve_exercises": False,
+        "exercises": [{"name": "Custom", "sets": 1, "reps": 2}],
     })
     resolve.assert_not_called()
-    mock_garmin_client.upload_workout.assert_called_once()
+    step = mock_garmin_client.upload_workout.call_args.args[0]["workoutSegments"][0]["workoutSteps"][0]
+    assert step["exerciseName"] == "Custom"

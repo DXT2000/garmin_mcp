@@ -801,7 +801,7 @@ def register_tools(app):
     async def create_strength_workout(
         name: str,
         exercises: List[Dict[str, Any]],
-        resolve_exercises: bool = False,
+        resolve_exercises: bool = True,
     ) -> str:
         """Create a strength workout and upload it to Garmin Connect.
 
@@ -822,7 +822,13 @@ def register_tools(app):
                 400 Invalid category. Full list:
                 https://connect.garmin.com/web-data/exercises/Exercises.json
             resolve_exercises: Resolve the whole batch against Garmin's public
-                catalog before upload. Defaults to false for legacy behavior.
+                catalog before upload (default true). If any exercise is not a
+                confident match, nothing is uploaded and the response has
+                status "needs_review" with alternatives: retry with the chosen
+                category and exercise_name, or pass false to upload the names
+                as free text, which Garmin keeps only in the step description.
+                If the catalog cannot be loaded, the upload goes ahead as free
+                text with a "warning".
         """
         try:
             catalog_warning = None

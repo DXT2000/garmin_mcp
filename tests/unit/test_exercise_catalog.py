@@ -263,3 +263,18 @@ def test_two_calls_use_memory_cache(monkeypatch, tmp_path, source_texts, mocker)
     get = mocker.patch.object(module.requests, "get", side_effect=[Response(raw), Response(labels)])
     assert module.load_catalog() is module.load_catalog()
     assert get.call_count == 2
+
+
+def test_resolved_exercise_keeps_time_end_condition(monkeypatch, catalog):
+    from garmin_mcp.workout_builders import build_strength_json
+
+    monkeypatch.setattr(module, "load_catalog", lambda: catalog)
+    result = resolve_strength_exercises([
+        {"name": "Reverse crunch hold", "category": "CRUNCH",
+         "exercise_name": "REVERSE_CRUNCH", "sets": 1, "duration_seconds": 45},
+    ])
+    assert result["status"] == "ready"
+    step = build_strength_json("Core", result["resolved_exercises"])["workoutSegments"][0]["workoutSteps"][0]
+    assert (step["category"], step["exerciseName"]) == ("CRUNCH", "REVERSE_CRUNCH")
+    assert step["endCondition"]["conditionTypeKey"] == "time"
+    assert step["endConditionValue"] == 45.0

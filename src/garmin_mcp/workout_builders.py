@@ -449,7 +449,9 @@ def build_strength_json(
 ) -> dict:
     """Build the Garmin Connect JSON for a strength workout.
 
-    Each exercise becomes a reps-based work step. When "sets" > 1 the exercise is
+    Each exercise becomes one work step that ends on "reps" (the default),
+    "duration_seconds" or "distance_meters"; giving more than one of those is
+    refused. When "sets" > 1 the exercise is
     emitted as a RepeatGroupDTO iterated that many times (work + rest per set), so
     Garmin shows the real set count — previously "sets" only ever reached the
     description text and every exercise displayed as 1 set. The name is preserved
@@ -474,11 +476,33 @@ def build_strength_json(
         ex_name = ex.get("name")
         if ex_name is None:
             ex_name = humanize(identifier.strip().upper()) if identifier else "Exercise"
+        # Refused rather than picking one: a caller sending both reps and a
+        # duration has not decided what ends the set.
+        end_fields = [
+            field for field in ("reps", "duration_seconds", "distance_meters")
+            if ex.get(field) is not None
+        ]
+        if len(end_fields) > 1:
+            raise ValueError(
+                f"exercise {ex_name!r}: give only one of reps, duration_seconds "
+                f"or distance_meters, got {', '.join(end_fields)}"
+            )
+        if "duration_seconds" in end_fields:
+            end_field, amount = "duration_seconds", int(ex["duration_seconds"])
+            end_condition = {"conditionTypeId": 2, "conditionTypeKey": "time"}
+            amount_label = f"{amount}s"
+        elif "distance_meters" in end_fields:
+            end_field, amount = "distance_meters", int(ex["distance_meters"])
+            end_condition = {"conditionTypeId": 3, "conditionTypeKey": "distance"}
+            amount_label = f"{amount} m"
+        else:
+            end_field, amount = "reps", int(ex.get("reps", 1))
+            end_condition = {"conditionTypeId": 10, "conditionTypeKey": "reps"}
+            amount_label = f"{amount} reps"
         sets = int(ex.get("sets", 1))
-        reps = int(ex.get("reps", 1))
         rest_seconds = int(ex.get("rest_seconds", 60))
         try:
-            _require_minimum(1, sets=sets, reps=reps)
+            _require_minimum(1, sets=sets, **{end_field: amount})
             _require_minimum(0, rest_seconds=rest_seconds)
         except ValueError as e:
             raise ValueError(f"exercise {ex_name!r}: {e}") from e
@@ -488,9 +512,9 @@ def build_strength_json(
             "type": "ExecutableStepDTO",
             "stepOrder": step_order,
             "stepType": {"stepTypeId": 3, "stepTypeKey": "interval"},
-            "description": f"{ex_name}: {sets} sets x {reps} reps",
-            "endCondition": {"conditionTypeId": 10, "conditionTypeKey": "reps"},
-            "endConditionValue": float(reps),
+            "description": f"{ex_name}: {sets} sets x {amount_label}",
+            "endCondition": end_condition,
+            "endConditionValue": float(amount),
             "targetType": {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"},
             "exerciseName": identifier.strip().upper() if identifier else ex_name,
         }
@@ -805,17 +829,20 @@ def register_tools(app):
     ) -> str:
         """Create a strength workout and upload it to Garmin Connect.
 
-        Each exercise becomes a reps-based step; when sets > 1 the exercise is
-        emitted as a repeat group of that many iterations (work + rest per set),
-        so Garmin shows the real set count. The name is kept in the step
-        description; it is also sent as exerciseName, which Garmin only retains when
-        it matches one of its own exercise keys (e.g. "FARMERS_CARRY").
+        Each exercise becomes one step that ends on reps, or on time or distance
+        for holds and carries (planks, farmers carry, sled); when sets > 1 the
+        exercise is emitted as a repeat group of that many iterations (work +
+        rest per set), so Garmin shows the real set count. The name is kept in
+        the step description; it is also sent as exerciseName, which Garmin only
+        retains when it matches one of its own exercise keys (e.g. "FARMERS_CARRY").
 
         Args:
             name: Workout name
                 Max 256 characters: Garmin SILENTLY TRUNCATES longer names.
-            exercises: List of dicts with keys: name, sets, reps, rest_seconds and an
-                optional category. Category is omitted from the payload when not
+            exercises: List of dicts with keys: name, sets, rest_seconds, an
+                optional exercise_name (Garmin's key, e.g. "ROMANIAN_DEADLIFT"),
+                an optional category, and at most one of reps (default 1),
+                duration_seconds or distance_meters. Category is omitted from the payload when not
                 given; Garmin accepts that. When given it must be one of Garmin's
                 exercise categories (e.g. SQUAT, DEADLIFT, PUSH_UP, CARRY, SLED) —
                 anything else, including "UNASSIGNED" and "OTHER", is rejected with

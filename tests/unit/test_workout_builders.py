@@ -569,3 +569,36 @@ def test_build_strength_json_two_multi_set_exercises_have_distinct_orders():
 )
 def test_every_builder_and_template_numbers_steps_depth_first(workout):
     _assert_depth_first_numbering(workout)
+
+
+@pytest.mark.parametrize("field,amount,condition_id,condition_key,label", [
+    ("duration_seconds", 45, 2, "time", "45s"),
+    ("distance_meters", 40, 3, "distance", "40 m"),
+])
+def test_strength_time_and_distance_end_conditions(
+    field, amount, condition_id, condition_key, label
+):
+    workout = build_strength_json(
+        name="Core", exercises=[{"name": "Plank", "sets": 1, field: amount}]
+    )
+    step = workout["workoutSegments"][0]["workoutSteps"][0]
+    assert step["endCondition"] == {
+        "conditionTypeId": condition_id, "conditionTypeKey": condition_key,
+    }
+    assert step["endConditionValue"] == float(amount)
+    assert step["description"] == f"Plank: 1 sets x {label}"
+
+
+def test_strength_refuses_more_than_one_end_condition():
+    with pytest.raises(ValueError, match="reps, duration_seconds"):
+        build_strength_json(
+            name="Core",
+            exercises=[{"name": "Plank", "reps": 10, "duration_seconds": 45}],
+        )
+
+
+@pytest.mark.parametrize("field", ["duration_seconds", "distance_meters"])
+@pytest.mark.parametrize("amount", [0, -5])
+def test_strength_refuses_non_positive_time_or_distance(field, amount):
+    with pytest.raises(ValueError, match=f"{field} must be >= 1"):
+        build_strength_json(name="Core", exercises=[{"name": "Plank", field: amount}])

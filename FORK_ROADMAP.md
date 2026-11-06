@@ -109,6 +109,10 @@ key, before copying it.
      `GARMIN_DISABLED_TOOLS` can collapse into one read-only switch.
    - Later: an MCP Apps view (week calendar, load chart) for clients that render
      it.
+   - `garmin-mcp-auth` raises a bare `EOFError` traceback when stdin is not a
+     terminal (seen 2026-11-03 via Claude Code's `!` prefix). It should check
+     `sys.stdin.isatty()` before each prompt (email, password, MFA code) and
+     exit with a one-line "run this in an interactive terminal" message.
 
 ### Not planned
 
